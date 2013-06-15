@@ -18,7 +18,7 @@ VERSION_TAG=v$(shell head -1 changelog | sed 's/^.\+(\(.\+\)-[0-9]\+).\+$$/\1/')
 
 all:
 	# Compile docker. Used by dpkg-buildpackage.
-	cd src/${GITHUB_PATH}/docker; GOPATH=${CURDIR} go build
+	cd src/${GITHUB_PATH}/docker; GOPATH=${CURDIR} CGO_ENABLED=0 go build -ldflags '-d -w'
 
 install:
 	# Used by dpkg-buildpackage
