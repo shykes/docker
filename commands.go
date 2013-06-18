@@ -188,7 +188,7 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 	// Setup an upload progress bar
 	// FIXME: ProgressReader shouldn't be this annoyning to use
 	sf := utils.NewStreamFormatter(false)
-	body := utils.ProgressReader(context, 0, os.Stderr, sf.FormatProgress("Uploading context", "%v bytes"))
+	body := utils.ProgressReader(ioutil.NopCloser(context), 0, os.Stderr, sf.FormatProgress("Uploading context", "%v bytes%0.0s%0.0s"), sf)
 	// Upload the build context
 	v := &url.Values{}
 	v.Set("t", *tag)
