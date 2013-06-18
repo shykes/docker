@@ -185,10 +185,14 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 	if err != nil {
 		return err
 	}
+	// Setup an upload progress bar
+	// FIXME: ProgressReader shouldn't be this annoyning to use
+	sf := utils.NewStreamFormatter(false)
+	body := utils.ProgressReader(context, 0, os.Stderr, sf.FormatProgress("Uploading context", "%v bytes"))
 	// Upload the build context
 	v := &url.Values{}
 	v.Set("t", *tag)
-	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s:%d%s?%s", cli.host, cli.port, "/build", v.Encode()), context)
+	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s:%d%s?%s", cli.host, cli.port, "/build", v.Encode()), body)
 	if err != nil {
 		return err
 	}
