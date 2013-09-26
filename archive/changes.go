@@ -1,7 +1,9 @@
 package archive
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/dotcloud/docker/utils"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,10 +109,11 @@ func Changes(layers []string, rw string) ([]Change, error) {
 }
 
 type FileInfo struct {
-	parent   *FileInfo
-	name     string
-	stat     syscall.Stat_t
-	children map[string]*FileInfo
+	parent     *FileInfo
+	name       string
+	stat       syscall.Stat_t
+	children   map[string]*FileInfo
+	capability []byte
 }
 
 func (root *FileInfo) LookUp(path string) *FileInfo {
@@ -181,7 +184,8 @@ func (info *FileInfo) addChanges(oldInfo *FileInfo, changes *[]Change) {
 				oldStat.Rdev != newStat.Rdev ||
 				// Don't look at size for dirs, its not a good measure of change
 				(oldStat.Size != newStat.Size && oldStat.Mode&syscall.S_IFDIR != syscall.S_IFDIR) ||
-				oldStat.Mtim != newStat.Mtim {
+				oldStat.Mtim != newStat.Mtim ||
+				bytes.Compare(oldChild.capability, newChild.capability) != 0 {
 				change := Change{
 					Path: newChild.path(),
 					Kind: ChangeModify,
@@ -255,6 +259,8 @@ func collectFileInfo(sourceDir string) (*FileInfo, error) {
 		if err := syscall.Lstat(path, &info.stat); err != nil {
 			return err
 		}
+
+		info.capability, _ = utils.Lgetxattr(path, "security.capability")
 
 		parent.children[info.name] = info
 
