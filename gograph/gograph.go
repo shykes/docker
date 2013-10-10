@@ -437,6 +437,7 @@ func (db *Database) openConn() (*sql.DB, error) {
 }
 
 // Return the id used to reference this entity
+// FIXME: Go convention is to use Id, not ID
 func (e *Entity) ID() string {
 	return e.id
 }
