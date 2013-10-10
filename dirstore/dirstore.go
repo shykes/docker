@@ -12,8 +12,6 @@ import (
 	"github.com/dotcloud/docker/gograph"
 )
 
-const TRASH_PREFIX string = "_trash_"
-
 // List returns the IDs of all directories currently registered in <store>.
 // <store> should be the path of the store on the filesystem.
 // Each returned ID is such that path.Join(store, id) is the path to that
