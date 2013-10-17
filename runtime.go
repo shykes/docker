@@ -37,6 +37,7 @@ type Runtime struct {
 	volumes        *Graph
 	srv            *Server
 	Dns            []string
+	registry       *registry.Registry
 }
 
 var sysInitPath string
@@ -431,6 +432,10 @@ func (runtime *Runtime) Commit(container *Container, repository, tag, comment, a
 
 // FIXME: harmonize with NewGraph()
 func NewRuntime(flGraphPath string, autoRestart bool, dns []string) (*Runtime, error) {
+	// We only support amd64 for now
+	if runtime.GOARCH != "amd64" {
+		return nil, fmt.Errorf("The docker runtime currently only supports amd64 (not %s). This will change in the future. Aborting.", runtime.GOARCH)
+	}
 	runtime, err := NewRuntimeFromDirectory(flGraphPath, autoRestart)
 	if err != nil {
 		return nil, err
@@ -475,6 +480,12 @@ func NewRuntimeFromDirectory(root string, autoRestart bool) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Initialize registry client
+	r, err := registry.NewRegistry(root, nil, srv.HTTPRequestFactory(nil))
+	if err != nil {
+		return nil, err
+	}
+
 	runtime := &Runtime{
 		root:           root,
 		repository:     runtimeRepo,
@@ -486,6 +497,7 @@ func NewRuntimeFromDirectory(root string, autoRestart bool) (*Runtime, error) {
 		capabilities:   &Capabilities{},
 		autoRestart:    autoRestart,
 		volumes:        volumes,
+		registry:	r,
 	}
 
 	if err := runtime.restore(); err != nil {

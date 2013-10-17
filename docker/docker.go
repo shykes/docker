@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/dotcloud/docker"
 	"github.com/dotcloud/docker/utils"
+	"github.com/dotcloud/docker/httpapi"
 	"io/ioutil"
 	"log"
 	"os"
@@ -133,7 +134,13 @@ func daemon(pidfile string, flGraphPath string, protoAddrs []string, autoRestart
 	if flDns != "" {
 		dns = []string{flDns}
 	}
-	server, err := docker.NewServer(flGraphPath, autoRestart, enableCors, dns)
+	// Initialize the docker runtime
+	runtime, err := docker.NewRuntime(flGraphPath, autoRestart, dns)
+	if err != nil {
+		return err
+	}
+	// Initialize a remote api server
+	server, err := docker.NewServer(runtime, enableCors)
 	if err != nil {
 		return err
 	}

@@ -602,6 +602,46 @@ func (r *Registry) SearchRepositories(term string) (*SearchResults, error) {
 	return result, err
 }
 
+
+func (r *Registry) poolAdd(kind, key string) error {
+	r.Lock()
+	defer r.Unlock()
+
+	if _, exists := r.pullingPool[key]; exists {
+		return fmt.Errorf("pull %s is already in progress", key)
+	}
+	if _, exists := r.pushingPool[key]; exists {
+		return fmt.Errorf("push %s is already in progress", key)
+	}
+
+	switch kind {
+	case "pull":
+		r.pullingPool[key] = struct{}{}
+		break
+	case "push":
+		r.pushingPool[key] = struct{}{}
+		break
+	default:
+		return fmt.Errorf("Unknown pool type")
+	}
+	return nil
+}
+
+func (r *Registry) poolRemove(kind, key string) error {
+	switch kind {
+	case "pull":
+		delete(r.pullingPool, key)
+		break
+	case "push":
+		delete(r.pushingPool, key)
+		break
+	default:
+		return fmt.Errorf("Unknown pool type")
+	}
+	return nil
+}
+
+
 func (r *Registry) GetAuthConfig(withPasswd bool) *auth.AuthConfig {
 	password := ""
 	if withPasswd {
@@ -633,12 +673,13 @@ type ImgData struct {
 }
 
 type Registry struct {
+	sync.Mutex
 	client     *http.Client
 	authConfig *auth.AuthConfig
 	reqFactory *utils.HTTPRequestFactory
 }
 
-func NewRegistry(root string, authConfig *auth.AuthConfig, factory *utils.HTTPRequestFactory) (r *Registry, err error) {
+func NewRegistry(authConfig *auth.AuthConfig, agent []utils.VersionInfo, headers map[string][]string,) (r *Registry, err error) {
 	httpTransport := &http.Transport{
 		DisableKeepAlives: true,
 		Proxy:             http.ProxyFromEnvironment,
@@ -655,6 +696,62 @@ func NewRegistry(root string, authConfig *auth.AuthConfig, factory *utils.HTTPRe
 		return nil, err
 	}
 
+	ud := utils.NewHTTPUserAgentDecorator(agent...)
+	md := &utils.HTTPMetaHeadersDecorator{
+		Headers: headers,
+	}
+	factory := utils.NewHTTPRequestFactory(ud, md)
 	r.reqFactory = factory
 	return r, nil
+}
+
+func (r *Registry) pullImage(r *registry.Registry, out io.Writer, imgID, endpoint string, token []string, sf *utils.StreamFormatter) error {
+	history, err := r.GetRemoteHistory(imgID, endpoint, token)
+	if err != nil {
+		return err
+	}
+	out.Write(sf.FormatProgress(utils.TruncateID(imgID), "Pulling", "dependend layers"))
+	// FIXME: Try to stream the images?
+	// FIXME: Launch the getRemoteImage() in goroutines
+
+	for _, id := range history {
+
+		// ensure no two downloads of the same layer happen at the same time
+		if err := srv.poolAdd("pull", "layer:"+id); err != nil {
+			utils.Errorf("Image (id: %s) pull is already running, skipping: %v", id, err)
+			return nil
+		}
+		defer srv.poolRemove("pull", "layer:"+id)
+
+		if !srv.runtime.graph.Exists(id) {
+			out.Write(sf.FormatProgress(utils.TruncateID(id), "Pulling", "metadata"))
+			imgJSON, imgSize, err := r.GetRemoteImageJSON(id, endpoint, token)
+			if err != nil {
+				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
+				// FIXME: Keep going in case of error?
+				return err
+			}
+			img, err := NewImgJSON(imgJSON)
+			if err != nil {
+				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
+				return fmt.Errorf("Failed to parse json: %s", err)
+			}
+
+			// Get the layer
+			out.Write(sf.FormatProgress(utils.TruncateID(id), "Pulling", "fs layer"))
+			layer, err := r.GetRemoteImageLayer(img.ID, endpoint, token)
+			if err != nil {
+				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
+				return err
+			}
+			defer layer.Close()
+			if err := srv.runtime.graph.Register(imgJSON, utils.ProgressReader(layer, imgSize, out, sf.FormatProgress(utils.TruncateID(id), "Downloading", "%8v/%v (%v)"), sf, false), img); err != nil {
+				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "downloading dependend layers"))
+				return err
+			}
+		}
+		out.Write(sf.FormatProgress(utils.TruncateID(id), "Download", "complete"))
+
+	}
+	return nil
 }

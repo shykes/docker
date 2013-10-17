@@ -1,4 +1,4 @@
-package docker
+package httpapi
 
 import (
 	"github.com/dotcloud/docker/utils"

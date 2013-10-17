@@ -1,4 +1,4 @@
-package docker
+package httpapi
 
 import (
 	"code.google.com/p/go.net/websocket"

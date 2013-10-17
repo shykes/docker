@@ -1,10 +1,11 @@
-package docker
+package httpapi
 
 import (
 	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/dotcloud/docker"
 	"github.com/dotcloud/docker/auth"
 	"github.com/dotcloud/docker/registry"
 	"github.com/dotcloud/docker/utils"
@@ -416,56 +417,6 @@ func (srv *Server) ContainerTag(name, repo, tag string, force bool) error {
 	return nil
 }
 
-func (srv *Server) pullImage(r *registry.Registry, out io.Writer, imgID, endpoint string, token []string, sf *utils.StreamFormatter) error {
-	history, err := r.GetRemoteHistory(imgID, endpoint, token)
-	if err != nil {
-		return err
-	}
-	out.Write(sf.FormatProgress(utils.TruncateID(imgID), "Pulling", "dependend layers"))
-	// FIXME: Try to stream the images?
-	// FIXME: Launch the getRemoteImage() in goroutines
-
-	for _, id := range history {
-
-		// ensure no two downloads of the same layer happen at the same time
-		if err := srv.poolAdd("pull", "layer:"+id); err != nil {
-			utils.Errorf("Image (id: %s) pull is already running, skipping: %v", id, err)
-			return nil
-		}
-		defer srv.poolRemove("pull", "layer:"+id)
-
-		if !srv.runtime.graph.Exists(id) {
-			out.Write(sf.FormatProgress(utils.TruncateID(id), "Pulling", "metadata"))
-			imgJSON, imgSize, err := r.GetRemoteImageJSON(id, endpoint, token)
-			if err != nil {
-				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
-				// FIXME: Keep going in case of error?
-				return err
-			}
-			img, err := NewImgJSON(imgJSON)
-			if err != nil {
-				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
-				return fmt.Errorf("Failed to parse json: %s", err)
-			}
-
-			// Get the layer
-			out.Write(sf.FormatProgress(utils.TruncateID(id), "Pulling", "fs layer"))
-			layer, err := r.GetRemoteImageLayer(img.ID, endpoint, token)
-			if err != nil {
-				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
-				return err
-			}
-			defer layer.Close()
-			if err := srv.runtime.graph.Register(imgJSON, utils.ProgressReader(layer, imgSize, out, sf.FormatProgress(utils.TruncateID(id), "Downloading", "%8v/%v (%v)"), sf, false), img); err != nil {
-				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "downloading dependend layers"))
-				return err
-			}
-		}
-		out.Write(sf.FormatProgress(utils.TruncateID(id), "Download", "complete"))
-
-	}
-	return nil
-}
 
 func (srv *Server) pullRepository(r *registry.Registry, out io.Writer, localName, remoteName, askedTag, indexEp string, sf *utils.StreamFormatter, parallel bool) error {
 	out.Write(sf.FormatStatus("", "Pulling repository %s", localName))
@@ -596,53 +547,16 @@ func (srv *Server) pullRepository(r *registry.Registry, out io.Writer, localName
 	return nil
 }
 
-func (srv *Server) poolAdd(kind, key string) error {
-	srv.Lock()
-	defer srv.Unlock()
-
-	if _, exists := srv.pullingPool[key]; exists {
-		return fmt.Errorf("pull %s is already in progress", key)
-	}
-	if _, exists := srv.pushingPool[key]; exists {
-		return fmt.Errorf("push %s is already in progress", key)
-	}
-
-	switch kind {
-	case "pull":
-		srv.pullingPool[key] = struct{}{}
-		break
-	case "push":
-		srv.pushingPool[key] = struct{}{}
-		break
-	default:
-		return fmt.Errorf("Unknown pool type")
-	}
-	return nil
-}
-
-func (srv *Server) poolRemove(kind, key string) error {
-	switch kind {
-	case "pull":
-		delete(srv.pullingPool, key)
-		break
-	case "push":
-		delete(srv.pushingPool, key)
-		break
-	default:
-		return fmt.Errorf("Unknown pool type")
-	}
-	return nil
-}
 
 func (srv *Server) ImagePull(localName string, tag string, out io.Writer, sf *utils.StreamFormatter, authConfig *auth.AuthConfig, metaHeaders map[string][]string, parallel bool) error {
 	r, err := registry.NewRegistry(srv.runtime.root, authConfig, srv.HTTPRequestFactory(metaHeaders))
 	if err != nil {
 		return err
 	}
-	if err := srv.poolAdd("pull", localName+":"+tag); err != nil {
+	if err := r.poolAdd("pull", localName+":"+tag); err != nil {
 		return err
 	}
-	defer srv.poolRemove("pull", localName+":"+tag)
+	defer r.poolRemove("pull", localName+":"+tag)
 
 	// Resolve the Repository name from fqn to endpoint + name
 	endpoint, remoteName, err := registry.ResolveRepositoryName(localName)
@@ -1302,14 +1216,8 @@ func (srv *Server) ContainerCopy(name string, resource string, out io.Writer) er
 
 }
 
-func NewServer(flGraphPath string, autoRestart, enableCors bool, dns ListOpts) (*Server, error) {
-	if runtime.GOARCH != "amd64" {
-		log.Fatalf("The docker runtime currently only supports amd64 (not %s). This will change in the future. Aborting.", runtime.GOARCH)
-	}
-	runtime, err := NewRuntime(flGraphPath, autoRestart, dns)
-	if err != nil {
-		return nil, err
-	}
+// NewServer returns a new remote api server which can be used to remotely control `runtime`.
+func NewServer(runtime *docker.Runtime, enableCors bool) (*Server, error) {
 	srv := &Server{
 		runtime:     runtime,
 		enableCors:  enableCors,
@@ -1319,9 +1227,14 @@ func NewServer(flGraphPath string, autoRestart, enableCors bool, dns ListOpts) (
 		listeners:   make(map[string]chan utils.JSONMessage),
 		reqFactory:  nil,
 	}
+	// FIXME: runtime should not depend on Server
+	if runtime.srv != nil {
+		return nil, fmt.Errorf("Error creating remote api server: runtime has already a registered http server")
+	}
 	runtime.srv = srv
 	return srv, nil
 }
+
 
 func (srv *Server) HTTPRequestFactory(metaHeaders map[string][]string) *utils.HTTPRequestFactory {
 	if srv.reqFactory == nil {
@@ -1349,7 +1262,7 @@ func (srv *Server) LogEvent(action, id, from string) {
 
 type Server struct {
 	sync.Mutex
-	runtime     *Runtime
+	runtime     *docker.Runtime
 	enableCors  bool
 	pullingPool map[string]struct{}
 	pushingPool map[string]struct{}

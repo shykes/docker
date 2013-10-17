@@ -1,4 +1,4 @@
-package docker
+package httpapi
 
 import (
 	"archive/tar"
