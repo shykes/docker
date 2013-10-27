@@ -39,7 +39,7 @@ func init() {
 // Only one api server can run at the same time - this is enforced by a pidfile.
 // The signals SIGINT, SIGKILL and SIGTERM are intercepted for cleanup.
 func jobInitApi(job *engine.Job) string {
-	srv, err := NewServer(ConfigFromJob(job))
+	srv, err := NewServer(job.Eng, ConfigFromJob(job))
 	if err != nil {
 		return err.Error()
 	}
@@ -55,17 +55,19 @@ func jobInitApi(job *engine.Job) string {
 		srv.Close()
 		os.Exit(0)
 	}()
-	err = engine.Register("serveapi", func(job *engine.Job) string {
-		return srv.ListenAndServe(job.Args...).Error()
-	})
-	if err != nil {
+	job.Eng.Hack_SetGlobalVar("httpapi.server", srv)
+	if err := engine.Register("start", srv.ContainerStart); err != nil {
+		return err.Error()
+	}
+	if err := engine.Register("serveapi", srv.ListenAndServe); err != nil {
 		return err.Error()
 	}
 	return "0"
 }
 
 
-func (srv *Server) ListenAndServe(protoAddrs ...string) error {
+func (srv *Server) ListenAndServe(job *engine.Job) string {
+	protoAddrs := job.Args
 	chErrors := make(chan error, len(protoAddrs))
 	for _, protoAddr := range protoAddrs {
 		protoAddrParts := strings.SplitN(protoAddr, "://", 2)
@@ -76,7 +78,7 @@ func (srv *Server) ListenAndServe(protoAddrs ...string) error {
 				log.Println("/!\\ DON'T BIND ON ANOTHER IP ADDRESS THAN 127.0.0.1 IF YOU DON'T KNOW WHAT YOU'RE DOING /!\\")
 			}
 		} else {
-			return fmt.Errorf("Invalid protocol format.")
+			return "Invalid protocol format."
 		}
 		go func() {
 			chErrors <- ListenAndServe(protoAddrParts[0], protoAddrParts[1], srv, true)
@@ -85,10 +87,10 @@ func (srv *Server) ListenAndServe(protoAddrs ...string) error {
 	for i := 0; i < len(protoAddrs); i += 1 {
 		err := <-chErrors
 		if err != nil {
-			return err
+			return err.Error()
 		}
 	}
-	return nil
+	return "0"
 }
 
 
@@ -1273,19 +1275,26 @@ func (srv *Server) ImageGetCached(imgID string, config *Config) (*Image, error) 
 	return nil, nil
 }
 
-func (srv *Server) ContainerStart(name string, hostConfig *HostConfig) error {
+func (srv *Server) ContainerStart(job *engine.Job) string {
+	if len(job.Args) < 1 {
+		return fmt.Sprintf("Usage: %s container_id", job.Name)
+	}
+	name := job.Args[0]
+	var hostConfig HostConfig
+	if err := job.ExportEnv(&hostConfig); err != nil {
+		return err.Error()
+	}
 	runtime := srv.runtime
 	container := runtime.Get(name)
 	if container == nil {
-		return fmt.Errorf("No such container: %s", name)
+		return fmt.Sprintf("No such container: %s", name)
 	}
 
-	// Register links
-	if hostConfig != nil && hostConfig.Links != nil {
+	if hostConfig.Links != nil {
 		for _, l := range hostConfig.Links {
 			parts, err := parseLink(l)
 			if err != nil {
-				return err
+				return err.Error()
 			}
 
 			childName := parts["name"]
@@ -1293,17 +1302,17 @@ func (srv *Server) ContainerStart(name string, hostConfig *HostConfig) error {
 				childName = "/" + childName
 			}
 			if err := runtime.Link(fmt.Sprintf("/%s", container.ID), childName, parts["alias"]); err != nil {
-				return err
+				return err.Error()
 			}
 		}
 	}
 
-	if err := container.Start(hostConfig); err != nil {
-		return fmt.Errorf("Error starting container %s: %s", name, err)
+	if err := container.Start(&hostConfig); err != nil {
+		return fmt.Sprintf("Error starting container %s: %s", name, err)
 	}
 	srv.LogEvent("start", container.ShortID(), runtime.repositories.ImageName(container.Image))
 
-	return nil
+	return "0"
 }
 
 func (srv *Server) ContainerStop(name string, t int) error {
@@ -1454,12 +1463,13 @@ func (srv *Server) ContainerCopy(name string, resource string, out io.Writer) er
 
 }
 
-func NewServer(config *DaemonConfig) (*Server, error) {
+func NewServer(eng *engine.Engine, config *DaemonConfig) (*Server, error) {
 	runtime, err := NewRuntime(config)
 	if err != nil {
 		return nil, err
 	}
 	srv := &Server{
+		Eng:         eng,
 		runtime:     runtime,
 		pullingPool: make(map[string]struct{}),
 		pushingPool: make(map[string]struct{}),
@@ -1503,4 +1513,5 @@ type Server struct {
 	events      []utils.JSONMessage
 	listeners   map[string]chan utils.JSONMessage
 	reqFactory  *utils.HTTPRequestFactory
+	Eng         *engine.Engine
 }
