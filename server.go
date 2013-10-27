@@ -39,6 +39,7 @@ func init() {
 // Only one api server can run at the same time - this is enforced by a pidfile.
 // The signals SIGINT, SIGKILL and SIGTERM are intercepted for cleanup.
 func jobInitApi(job *engine.Job) string {
+	job.Logf("Creating server")
 	srv, err := NewServer(job.Eng, ConfigFromJob(job))
 	if err != nil {
 		return err.Error()
@@ -49,6 +50,7 @@ func jobInitApi(job *engine.Job) string {
 			log.Fatal(err)
 		}
 	}
+	job.Logf("Setting up signal traps")
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, os.Kill, os.Signal(syscall.SIGTERM))
 	go func() {
@@ -1280,6 +1282,8 @@ func (srv *Server) ImageGetCached(imgID string, config *Config) (*Image, error) 
 }
 
 func (srv *Server) ContainerStart(job *engine.Job) string {
+	job.Logf("srv engine = %s", srv.Eng.Root())
+	job.Logf("job engine = %s", job.Eng.Root())
 	if len(job.Args) < 1 {
 		return fmt.Sprintf("Usage: %s container_id", job.Name)
 	}
@@ -1289,6 +1293,7 @@ func (srv *Server) ContainerStart(job *engine.Job) string {
 		return err.Error()
 	}
 	runtime := srv.runtime
+	job.Logf("loading containers from %s", runtime.repository)
 	container := runtime.Get(name)
 	if container == nil {
 		return fmt.Sprintf("No such container: %s", name)
