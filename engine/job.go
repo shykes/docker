@@ -1,10 +1,13 @@
 package engine
 
 import (
+	"bufio"
 	"bytes"
 	"io"
+	"io/ioutil"
 	"strings"
 	"fmt"
+	"sync"
 	"encoding/json"
 )
 
@@ -26,17 +29,29 @@ type Job struct {
 	Name	string
 	Args	[]string
 	env	[]string
-	Stdin	io.ReadCloser
-	Stdout	io.WriteCloser
-	Stderr	io.WriteCloser
+	Stdin	io.Reader
+	Stdout	io.Writer
+	Stderr	io.Writer
 	handler	func(*Job) string
 	status	string
+	onExit	[]func()
 }
 
 // Run executes the job and blocks until the job completes.
 // If the job returns a failure status, an error is returned
 // which includes the status.
 func (job *Job) Run() error {
+	defer func() {
+		var wg sync.WaitGroup
+		for _, f := range job.onExit {
+			wg.Add(1)
+			go func(f func()) {
+				f()
+				wg.Done()
+			}(f)
+		}
+		wg.Wait()
+	}()
 	job.Logf("{")
 	defer func() {
 		job.Logf("}")
@@ -51,6 +66,61 @@ func (job *Job) Run() error {
 	}
 	return nil
 }
+
+func (job *Job) StdoutParseLines(dst *[]string, limit int) {
+	job.parseLines(job.StdoutPipe(), dst, limit)
+}
+
+func (job *Job) StderrParseLines(dst *[]string, limit int) {
+	job.parseLines(job.StderrPipe(), dst, limit)
+}
+
+func (job *Job) parseLines(src io.Reader, dst *[]string, limit int) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(src)
+		for scanner.Scan() {
+			// If the limit is reached, flush the rest of the source and return
+			if limit > 0 && len(*dst) >= limit {
+				io.Copy(ioutil.Discard, src)
+				return
+			}
+			line := scanner.Text()
+			// Append the line (with delimitor removed)
+			*dst = append(*dst, line)
+		}
+	}()
+	job.onExit = append(job.onExit, wg.Wait)
+}
+
+func (job *Job) StdoutParseString(dst *string) {
+	lines := make([]string, 0, 1)
+	job.StdoutParseLines(&lines, 1)
+	job.onExit = append(job.onExit, func() { *dst = lines[0]; })
+}
+
+func (job *Job) StderrParseString(dst *string) {
+	lines := make([]string, 0, 1)
+	job.StderrParseLines(&lines, 1)
+	job.onExit = append(job.onExit, func() { *dst = lines[0]; })
+}
+
+func (job *Job) StdoutPipe() io.ReadCloser {
+	r, w := io.Pipe()
+	job.Stdout = w
+	job.onExit = append(job.onExit, func(){ w.Close() })
+	return r
+}
+
+func (job *Job) StderrPipe() io.ReadCloser {
+	r, w := io.Pipe()
+	job.Stderr = w
+	job.onExit = append(job.onExit, func(){ w.Close() })
+	return r
+}
+
 
 // String returns a human-readable description of `job`
 func (job *Job) String() string {
@@ -198,4 +268,13 @@ func (job *Job) Environ() map[string]string {
 func (job *Job) Logf(format string, args ...interface{}) (n int, err error) {
 	prefixedFormat := fmt.Sprintf("[%s] %s\n", job, strings.TrimRight(format, "\n"))
 	return fmt.Fprintf(job.Stdout, prefixedFormat, args...)
+}
+
+func (job *Job) Printf(format string, args ...interface{}) (n int, err error) {
+	return fmt.Fprintf(job.Stdout, format, args...)
+}
+
+func (job *Job) Errorf(format string, args ...interface{}) (n int, err error) {
+	return fmt.Fprintf(job.Stderr, format, args...)
+
 }

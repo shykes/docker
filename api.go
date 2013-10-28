@@ -529,6 +529,7 @@ func postContainersCreate(srv *Server, version float64, w http.ResponseWriter, r
 		return err
 	}
 
+
 	resolvConf, err := utils.GetResolvConf()
 	if err != nil {
 		return err
@@ -539,15 +540,17 @@ func postContainersCreate(srv *Server, version float64, w http.ResponseWriter, r
 		config.Dns = defaultDns
 	}
 
-	id, warnings, err := srv.ContainerCreate(config)
-	if err != nil {
+	job := srv.Eng.Job("create")
+	if err := job.ImportEnv(&config); err != nil {
 		return err
 	}
-	out.ID = id
-	for _, warning := range warnings {
-		out.Warnings = append(out.Warnings, warning)
+	// Read container ID from the first line of stdout
+	job.StdoutParseString(&out.ID)
+	// Read warnings from stderr
+	job.StderrParseLines(&out.Warnings, 0)
+	if err := job.Run(); err != nil {
+		return err
 	}
-
 	if config.Memory > 0 && !srv.runtime.capabilities.MemoryLimit {
 		log.Println("WARNING: Your kernel does not support memory limit capabilities. Limitation discarded.")
 		out.Warnings = append(out.Warnings, "Your kernel does not support memory limit capabilities. Limitation discarded.")
