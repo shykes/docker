@@ -522,27 +522,18 @@ func postImagesPush(srv *Server, version float64, w http.ResponseWriter, r *http
 }
 
 func postContainersCreate(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	config := &Config{}
 	out := &APIRun{}
-
-	if err := json.NewDecoder(r.Body).Decode(config); err != nil {
+	job := srv.Eng.Job("create")
+	if err := job.DecodeEnv(r.Body); err != nil {
 		return err
 	}
-
-
 	resolvConf, err := utils.GetResolvConf()
 	if err != nil {
 		return err
 	}
-
-	if !config.NetworkDisabled && len(config.Dns) == 0 && len(srv.runtime.config.Dns) == 0 && utils.CheckLocalDns(resolvConf) {
+	if !job.GetenvBool("NetworkDisabled") && len(job.Getenv("Dns")) == 0 && len(srv.runtime.config.Dns) == 0 && utils.CheckLocalDns(resolvConf) {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("Docker detected local DNS server on resolv.conf. Using default external servers: %v", defaultDns))
-		config.Dns = defaultDns
-	}
-
-	job := srv.Eng.Job("create")
-	if err := job.ImportEnv(&config); err != nil {
-		return err
+		job.SetenvList("Dns", defaultDns)
 	}
 	// Read container ID from the first line of stdout
 	job.StdoutParseString(&out.ID)
@@ -551,16 +542,16 @@ func postContainersCreate(srv *Server, version float64, w http.ResponseWriter, r
 	if err := job.Run(); err != nil {
 		return err
 	}
-	if config.Memory > 0 && !srv.runtime.capabilities.MemoryLimit {
+	if job.GetenvInt("Memory") > 0 && !srv.runtime.capabilities.MemoryLimit {
 		log.Println("WARNING: Your kernel does not support memory limit capabilities. Limitation discarded.")
 		out.Warnings = append(out.Warnings, "Your kernel does not support memory limit capabilities. Limitation discarded.")
 	}
-	if config.Memory > 0 && !srv.runtime.capabilities.SwapLimit {
+	if job.GetenvInt("Memory") > 0 && !srv.runtime.capabilities.SwapLimit {
 		log.Println("WARNING: Your kernel does not support swap limit capabilities. Limitation discarded.")
 		out.Warnings = append(out.Warnings, "Your kernel does not support memory swap capabilities. Limitation discarded.")
 	}
 
-	if !config.NetworkDisabled && srv.runtime.capabilities.IPv4ForwardingDisabled {
+	if !job.GetenvBool("NetworkDisabled") && srv.runtime.capabilities.IPv4ForwardingDisabled {
 		log.Println("Warning: IPv4 forwarding is disabled.")
 		out.Warnings = append(out.Warnings, "IPv4 forwarding is disabled.")
 	}

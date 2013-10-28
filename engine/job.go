@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"io"
 	"io/ioutil"
+	"strconv"
 	"strings"
 	"fmt"
 	"sync"
 	"encoding/json"
+	"os"
 )
 
 // A job is the fundamental unit of work in the docker engine.
@@ -52,9 +54,15 @@ func (job *Job) Run() error {
 		}
 		wg.Wait()
 	}()
-	job.Logf("{")
+	if job.Stdout != nil && job.Stdout != os.Stdout {
+		job.Stdout = io.MultiWriter(job.Stdout, os.Stdout)
+	}
+	if job.Stderr != nil && job.Stderr != os.Stderr {
+		job.Stderr = io.MultiWriter(job.Stderr, os.Stderr)
+	}
+	job.Eng.Logf("+job %s", job.CallString())
 	defer func() {
-		job.Logf("}")
+		job.Eng.Logf("-job %s%s", job.CallString(), job.StatusString())
 	}()
 	if job.handler == nil {
 		job.status = "command not found"
@@ -98,7 +106,7 @@ func (job *Job) parseLines(src io.Reader, dst *[]string, limit int) {
 func (job *Job) StdoutParseString(dst *string) {
 	lines := make([]string, 0, 1)
 	job.StdoutParseLines(&lines, 1)
-	job.onExit = append(job.onExit, func() { *dst = lines[0]; })
+	job.onExit = append(job.onExit, func() { if len(lines) >= 1 { *dst = lines[0] }})
 }
 
 func (job *Job) StderrParseString(dst *string) {
@@ -122,9 +130,11 @@ func (job *Job) StderrPipe() io.ReadCloser {
 }
 
 
-// String returns a human-readable description of `job`
-func (job *Job) String() string {
-	s := fmt.Sprintf("%s.%s(%s)", job.Eng, job.Name, strings.Join(job.Args, ", "))
+func (job *Job) CallString() string {
+	return fmt.Sprintf("%s(%s)", job.Name, strings.Join(job.Args, ", "))
+}
+
+func (job *Job) StatusString() string {
 	// FIXME: if a job returns the empty string, it will be printed
 	// as not having returned.
 	// (this only affects String which is a convenience function).
@@ -135,9 +145,14 @@ func (job *Job) String() string {
 		} else {
 			okerr = "ERR"
 		}
-		s = fmt.Sprintf("%s = %s (%s)", s, okerr, job.status)
+		return fmt.Sprintf(" = %s (%s)", okerr, job.status)
 	}
-	return s
+	return ""
+}
+
+// String returns a human-readable description of `job`
+func (job *Job) String() string {
+	return fmt.Sprintf("%s.%s%s", job.Eng, job.CallString(), job.StatusString())
 }
 
 func (job *Job) Getenv(key string) (value string) {
@@ -174,6 +189,19 @@ func (job *Job) SetenvBool(key string, value bool) {
 	}
 }
 
+func (job *Job) GetenvInt(key string) int64 {
+	s := strings.Trim(job.Getenv(key), " \t")
+	val, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return -1
+	}
+	return val
+}
+
+func (job *Job) SetenvInt(key string, value int64) {
+	job.Setenv(key, fmt.Sprintf("%d", value))
+}
+
 func (job *Job) GetenvList(key string) []string {
 	sval := job.Getenv(key)
 	l := make([]string, 0, 1)
@@ -207,13 +235,21 @@ func (job *Job) DecodeEnv(src io.Reader) error {
 		return err
 	}
 	for k, v := range m {
-		if sval, ok := v.(string); ok {
+		// FIXME: we fix-convert float values to int, because
+		// encoding/json decodes integers to float64, but cannot encode them back.
+		// (See http://golang.org/src/pkg/encoding/json/decode.go#L46)
+		if fval, ok := v.(float64); ok {
+			job.Logf("Converted to float: %v->%v", v, fval)
+			job.SetenvInt(k, int64(fval))
+		} else if sval, ok := v.(string); ok {
+			job.Logf("Converted to string: %v->%v", v, sval)
 			job.Setenv(k, sval)
 		} else	if val, err := json.Marshal(v); err == nil {
 			job.Setenv(k, string(val))
 		} else {
 			job.Setenv(k, fmt.Sprintf("%v", v))
 		}
+		job.Logf("Decoded %s=%#v to %s=%#v", k, v, k, job.Getenv(k))
 	}
 	return nil
 }
@@ -223,10 +259,17 @@ func (job *Job) EncodeEnv(dst io.Writer) error {
 	for k, v := range job.Environ() {
 		var val interface{}
 		if err := json.Unmarshal([]byte(v), &val); err == nil {
+			// FIXME: we fix-convert float values to int, because
+			// encoding/json decodes integers to float64, but cannot encode them back.
+			// (See http://golang.org/src/pkg/encoding/json/decode.go#L46)
+			if fval, isFloat := val.(float64); isFloat {
+				val = int(fval)
+			}
 			m[k] = val
 		} else {
 			m[k] = v
 		}
+		job.Logf("Encoded %s=%#v to %s=%#v", k, v, k, m[k])
 	}
 	if err := json.NewEncoder(dst).Encode(&m); err != nil {
 		return err
@@ -235,21 +278,38 @@ func (job *Job) EncodeEnv(dst io.Writer) error {
 }
 
 func (job *Job) ExportEnv(dst interface{}) (err error) {
+	fmt.Fprintf(os.Stderr, "ExportEnv()\n")
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("ExportEnv %s", err)
+		}
+	}()
 	var buf bytes.Buffer
+	job.Logf("ExportEnv: step 1: encode/marshal the env to an intermediary json representation")
+	fmt.Fprintf(os.Stderr, "Printed ExportEnv step 1\n")
 	if err := job.EncodeEnv(&buf); err != nil {
 		return err
 	}
+	job.Logf("ExportEnv: step 1 complete: json=|%s|", buf)
+	job.Logf("ExportEnv: step 2: decode/unmarshal the intermediary json into the destination object")
 	if err := json.NewDecoder(&buf).Decode(dst); err != nil {
 		return err
 	}
+	job.Logf("ExportEnv: step 2 complete")
 	return nil
 }
 
-func (job *Job) ImportEnv(src interface{}) error {
+func (job *Job) ImportEnv(src interface{}) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("ImportEnv: %s", err)
+		}
+	}()
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(src); err != nil {
 		return err
 	}
+	job.Logf("ImportEnv: json=|%s|", buf)
 	if err := job.DecodeEnv(&buf); err != nil {
 		return err
 	}
@@ -267,7 +327,7 @@ func (job *Job) Environ() map[string]string {
 
 func (job *Job) Logf(format string, args ...interface{}) (n int, err error) {
 	prefixedFormat := fmt.Sprintf("[%s] %s\n", job, strings.TrimRight(format, "\n"))
-	return fmt.Fprintf(job.Stdout, prefixedFormat, args...)
+	return fmt.Fprintf(job.Stderr, prefixedFormat, args...)
 }
 
 func (job *Job) Printf(format string, args ...interface{}) (n int, err error) {

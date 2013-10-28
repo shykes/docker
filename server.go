@@ -61,6 +61,9 @@ func jobInitApi(job *engine.Job) string {
 		os.Exit(0)
 	}()
 	job.Eng.Hack_SetGlobalVar("httpapi.server", srv)
+	if err := job.Eng.Register("create", srv.ContainerCreate); err != nil {
+		return err.Error()
+	}
 	if err := job.Eng.Register("start", srv.ContainerStart); err != nil {
 		return err.Error()
 	}

@@ -630,10 +630,10 @@ func TestPostCommit(t *testing.T) {
 }
 
 func TestPostContainersCreate(t *testing.T) {
-	runtime := mkRuntime(t)
+	eng := NewTestEngine(t)
+	srv := mkServerFromEngine(eng, t)
+	runtime := srv.runtime
 	defer nuke(runtime)
-
-	srv := &Server{runtime: runtime}
 
 	configJSON, err := json.Marshal(&Config{
 		Image:  GetTestImage(runtime).ID,
