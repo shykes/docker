@@ -97,3 +97,15 @@ func (d *Driver) Changes(img *Image, dest string) ([]Change, error) {
 func (d *Driver) Layer(img *Image, dest string) (archive.Archive, error) {
 	return nil, fmt.Errorf("Not implemented")
 }
+
+func (a *Driver) Mount(img graphdriver.Image, root string) error {
+	return fmt.Errorf("Not implemented")
+}
+
+func (a *Driver) Unmount(root string) error {
+	return fmt.Errorf("Not implemented")
+}
+
+func (a *Driver) Mounted(root string) (bool, error) {
+	return false, fmt.Errorf("Not implemented")
+}
