@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
+	"github.com/dotcloud/docker/changes"
 	"github.com/dotcloud/docker/term"
 	"github.com/dotcloud/docker/utils"
 	"github.com/kr/pty"
@@ -1385,7 +1386,7 @@ func (container *Container) Mount() error {
 	return container.runtime.Mount(container)
 }
 
-func (container *Container) Changes() ([]Change, error) {
+func (container *Container) Changes() ([]changes.Change, error) {
 	return container.runtime.Changes(container)
 }
 

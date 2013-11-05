@@ -5,6 +5,7 @@ import (
 	"container/list"
 	"database/sql"
 	"fmt"
+	"github.com/dotcloud/docker/changes"
 	"github.com/dotcloud/docker/gograph"
 	"github.com/dotcloud/docker/utils"
 	"io"
@@ -657,7 +658,7 @@ func (runtime *Runtime) Mounted(container *Container) (bool, error) {
 	return runtime.graph.driver.Mounted(container.root)
 }
 
-func (runtime *Runtime) Changes(container *Container) ([]Change, error) {
+func (runtime *Runtime) Changes(container *Container) ([]changes.Change, error) {
 	img, err := container.GetImage()
 	if err != nil {
 		return nil, err
@@ -666,7 +667,7 @@ func (runtime *Runtime) Changes(container *Container) ([]Change, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Changes(layers, container.rwPath())
+	return changes.Changes(layers, container.rwPath())
 }
 
 // History is a convenience type for storing a list of containers,

@@ -1,7 +1,9 @@
 package devmapper
 
 import (
+	"fmt"
 	"io/ioutil"
+	"github.com/dotcloud/docker/graphdriver"
 	"os"
 	"testing"
 )
@@ -11,21 +13,19 @@ type TestImage struct {
 	path	string
 }
 
-func (img *TestImage) ID() string {
+func (img *TestImage) Layers() ([]string, error) {
+	return nil, fmt.Errorf("Not implemented")
+}
+
+func (img *TestImage) GetID() string {
 	return img.id
 }
 
-func (img *TestImage) Path() string {
-	return img.path
-}
-
-func (img *TestImage) Parent() (Image, error) {
+func (img *TestImage) GetParentImage() (graphdriver.Image, error) {
 	return nil, nil
 }
 
-
-
-func mkTestImage(t *testing.T) Image {
+func mkTestImage(t *testing.T) graphdriver.Image {
 	return &TestImage{
 		path:	mkTestDirectory(t),
 		id:	"4242",
@@ -43,19 +43,23 @@ func mkTestDirectory(t *testing.T) string {
 func TestInit(t *testing.T) {
 	home := mkTestDirectory(t)
 	defer os.RemoveAll(home)
-	plugin, err := Init(home)
+	plugin, err := graphdriver.New("devicemapper")
 	if err != nil {
 		t.Fatal(err)
 	}
+	dmplugin := plugin.(*Driver)
+	if dmplugin == nil {
+		t.Fatal("driver is not devicemapper")
+	}
 	defer func() {
 		return
-		if err := plugin.Cleanup(); err != nil {
+		if err := dmplugin.Cleanup(); err != nil {
 			t.Fatal(err)
 		}
 	}()
 	img := mkTestImage(t)
 	defer os.RemoveAll(img.(*TestImage).path)
-	if err := plugin.OnCreate(img, nil); err != nil {
+	if err := dmplugin.OnCreate(img, nil); err != nil {
 		t.Fatal(err)
 	}
 }

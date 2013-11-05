@@ -17,6 +17,9 @@ var (
 )
 
 func Register(name string, initFunc InitFunc) error {
+	if drivers == nil {
+		drivers = make(map[string]InitFunc)
+	}
 	if _, exists := drivers[name]; exists {
 		return fmt.Errorf("Name already registered %s", name)
 	}
@@ -52,6 +55,8 @@ func New(root string) (Driver, error) {
 
 type Image interface {
 	Layers() ([]string, error)
+	GetID() string
+	GetParentImage() (Image, error)
 }
 
 type Driver interface {

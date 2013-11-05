@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/dotcloud/docker/archive"
 	"github.com/dotcloud/docker/auth"
+	"github.com/dotcloud/docker/changes"
 	"github.com/dotcloud/docker/registry"
 	"github.com/dotcloud/docker/term"
 	"github.com/dotcloud/docker/utils"
@@ -1320,7 +1321,7 @@ func (cli *DockerCli) CmdDiff(args ...string) error {
 		return err
 	}
 
-	changes := []Change{}
+	changes := []changes.Change{}
 	err = json.Unmarshal(body, &changes)
 	if err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/dotcloud/docker/utils"
+	"github.com/dotcloud/docker/changes"
 	"io"
 	"net"
 	"net/http"
@@ -457,7 +458,7 @@ func TestGetContainersChanges(t *testing.T) {
 	if err := getContainersChanges(srv, APIVERSION, r, nil, map[string]string{"name": container.ID}); err != nil {
 		t.Fatal(err)
 	}
-	changes := []Change{}
+	changes := []changes.Change{}
 	if err := json.Unmarshal(r.Body.Bytes(), &changes); err != nil {
 		t.Fatal(err)
 	}
