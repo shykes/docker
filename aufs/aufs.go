@@ -26,7 +26,7 @@ func Init(root string) (graphdriver.Driver, error) {
 	return &AufsDriver{}, nil
 }
 
-func (a *AufsDriver) Mount(img graphdriver.Image, root string) error {
+func (a *AufsDriver) Mount(img graphdriver.Dir, root string) error {
 	layers, err := img.Layers()
 	if err != nil {
 		return err
