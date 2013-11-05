@@ -3,6 +3,7 @@ package devmapper
 import (
 	"fmt"
 	"github.com/dotcloud/docker/archive"
+	"github.com/dotcloud/docker/changes"
 	"github.com/dotcloud/docker/graphdriver"
 	"os"
 	"path"
@@ -10,9 +11,6 @@ import (
 
 func init() {
 	graphdriver.Register("devicemapper", Init)
-}
-
-type Change interface {
 }
 
 // End of placeholder interfaces.
@@ -81,7 +79,7 @@ func (d *Driver) mountpoint(id string) string {
 	return path.Join(d.home, "mnt", id)
 }
 
-func (d *Driver) Changes(img *graphdriver.Image, dest string) ([]Change, error) {
+func (d *Driver) Changes(img *graphdriver.Image, dest string) ([]changes.Change, error) {
 	return nil, fmt.Errorf("Not implemented")
 }
 
