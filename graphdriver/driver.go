@@ -50,17 +50,17 @@ func New(root string) (Driver, error) {
 	return nil, lastError
 }
 
-type Image interface {
+type Dir interface {
 	Layers() ([]string, error)
 }
 
 type Driver interface {
-	//	Create(img *Image) error
-	//	Delete(img *Image) error
-	Mount(img Image, root string) error
+	//	Create(img *Dir) error
+	//	Delete(img *Dir) error
+	Mount(img Dir, root string) error
 	Unmount(root string) error
 	Mounted(root string) (bool, error)
-	//	UnmountAll(img *Image) error
-	//	Changes(img *Image, dest string) ([]Change, error)
-	//	Layer(img *Image, dest string) (Archive, error)
+	//	UnmountAll(img *Dir) error
+	//	Changes(img *Dir, dest string) ([]Change, error)
+	//	Layer(img *Dir, dest string) (Archive, error)
 }
