@@ -55,6 +55,8 @@ func New(root string) (Driver, error) {
 
 type Image interface {
 	Layers() ([]string, error)
+	GetID() string
+	GetParentImage() (Image, error)
 }
 
 type Driver interface {

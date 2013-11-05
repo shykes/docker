@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
+	"github.com/dotcloud/docker/graphdriver"
 	"github.com/dotcloud/docker/utils"
 	"io"
 	"io/ioutil"
@@ -148,6 +149,10 @@ func (image *Image) ShortID() string {
 	return utils.TruncateID(image.ID)
 }
 
+func (image *Image) GetID() string {
+	return image.ID
+}
+
 func ValidateID(id string) error {
 	if id == "" {
 		return fmt.Errorf("Image id can't be empty")
@@ -244,6 +249,10 @@ func (img *Image) GetParent() (*Image, error) {
 		return nil, fmt.Errorf("Can't lookup parent of unregistered image")
 	}
 	return img.graph.Get(img.Parent)
+}
+
+func (img *Image) GetParentImage() (graphdriver.Image, error) {
+	return img.GetParent()
 }
 
 func (img *Image) root() (string, error) {
