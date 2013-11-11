@@ -72,7 +72,7 @@ func StoreImage(img *Image, jsonData []byte, layerData archive.Archive, root, ro
 	if layerData != nil {
 		start := time.Now()
 		utils.Debugf("Start untar layer")
-		if err := archive.Untar(layerData, layer); err != nil {
+		if err := archive.ApplyLayer(layer, layerData); err != nil {
 			return err
 		}
 		utils.Debugf("Untar time: %vs", time.Now().Sub(start).Seconds())
