@@ -537,7 +537,12 @@ func (srv *Server) pullImage(r *registry.Registry, out io.Writer, imgID, endpoin
 	// FIXME: Try to stream the images?
 	// FIXME: Launch the getRemoteImage() in goroutines
 
-	for _, id := range history {
+	// We need to do this in reverse, because Graph.Register()
+	// needs the parent to exist before we can register a child,
+	// as e.g. the devicemapper backend needs the parent device to
+	// exist to create a snapshot.
+	for i:= len(history) - 1; i >= 0; i-- {
+		id := history[i];
 
 		// ensure no two downloads of the same layer happen at the same time
 		if err := srv.poolAdd("pull", "layer:"+id); err != nil {
