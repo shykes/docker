@@ -246,9 +246,12 @@ func dmGetBlockSizeFct(fd uintptr) (int64, syscall.Errno) {
 	return size, err
 }
 
-func dmTaskGetInfoFct(task *CDmTask, info *Info) int {
+func dmTaskGetInfoFct(task *CDmTask, info *Info) (ret int) {
 	Cinfo := C.struct_dm_info{}
 	defer func() {
+		if ret != 1 {
+			C.perror(C.CString("getinfo"))
+		}
 		info.Exists = int(Cinfo.exists)
 		info.Suspended = int(Cinfo.suspended)
 		info.LiveTable = int(Cinfo.live_table)

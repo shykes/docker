@@ -1,5 +1,8 @@
 package devmapper
 
+//#include <stdio.h>
+//#include <errno.h>
+import "C"
 import (
 	"errors"
 	"fmt"
@@ -246,7 +249,12 @@ func GetBlockDeviceSize(file *os.File) (uint64, error) {
 }
 
 // This is the programmatic example of "dmsetup create"
-func createPool(poolName string, dataFile *os.File, metadataFile *os.File) error {
+func createPool(poolName string, dataFile *os.File, metadataFile *os.File) (err error) {
+	defer func() {
+		if err != nil {
+			C.perror(C.CString("createPool"))
+		}
+	}()
 	task, err := createTask(DeviceCreate, poolName)
 	if task == nil {
 		return err

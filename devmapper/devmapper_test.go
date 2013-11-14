@@ -1,6 +1,7 @@
 package devmapper
 
 import (
+	"io/ioutil"
 	"syscall"
 	"testing"
 )
@@ -175,30 +176,61 @@ func TestTaskAddTarget(t *testing.T) {
 	}
 }
 
-// func TestTaskGetInfo(t *testing.T) {
-// 	task := taskCreate(t, DeviceInfo)
+func TestTaskGetInfo(t *testing.T) {
+	dataFile, err := ioutil.TempFile("", "docker-test-pool-data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metaFile, err := ioutil.TempFile("", "docker-test-pool-meta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	poolName := "docker-test-pool"
 
-// 	// Test success
-// 	if _, err := task.GetInfo(); err != nil {
-// 		t.Fatal(err)
-// 	}
+	_, err = AttachLoopDevice(dataFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = AttachLoopDevice(metaFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	// Test failure
-// 	DmTaskGetInfo = dmTaskGetInfoFail
-// 	defer func() { DmTaskGetInfo = dmTaskGetInfoFct }()
+	if err := createPool(poolName, dataFile, metaFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := createDevice(poolName, 0); err != nil {
+		t.Fatal(err)
+	}
 
-// 	if _, err := task.GetInfo(); err != ErrTaskGetInfo {
-// 		t.Fatalf("An error should have occured running GetInfo.")
-// 	}
-// }
+	task, err := createTask(DeviceInfo, poolName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := task.Run(); err != nil {
+		t.Fatal(err)
+	}
+	// Test success
+	if _, err := task.GetInfo(); err != nil {
+		t.Fatal(err)
+	}
 
-// func TestTaskGetNextTarget(t *testing.T) {
-// 	task := taskCreate(t, DeviceInfo)
+	// Test failure
+	DmTaskGetInfo = dmTaskGetInfoFail
+	defer func() { DmTaskGetInfo = dmTaskGetInfoFct }()
 
-// 	if next, _, _, _, _ := task.GetNextTarget(0); next == 0 {
-// 		t.Fatalf("The next target should not be 0.")
-// 	}
-// }
+	if _, err := task.GetInfo(); err != ErrTaskGetInfo {
+		t.Fatalf("An error should have occured running GetInfo.")
+	}
+}
+
+func TestTaskGetNextTarget(t *testing.T) {
+	task := taskCreate(t, DeviceInfo)
+
+	if next, _, _, _, _ := task.GetNextTarget(0); next == 0 {
+		t.Fatalf("The next target should not be 0.")
+	}
+}
 
 /// Utils
 func taskCreate(t *testing.T, taskType TaskType) *Task {
