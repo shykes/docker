@@ -624,7 +624,7 @@ func NewRuntimeFromDirectory(config *DaemonConfig) (*Runtime, error) {
 	if err := linkLxcStart(config.Root); err != nil {
 		return nil, err
 	}
-	g, err := NewGraph(path.Join(config.Root, "graph"), driver)
+	g, err := NewGraph(path.Join(config.Root, "graph", driver.String()), driver)
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +639,7 @@ func NewRuntimeFromDirectory(config *DaemonConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	repositories, err := NewTagStore(path.Join(config.Root, "repositories"), g)
+	repositories, err := NewTagStore(path.Join(config.Root, fmt.Sprintf("repositories-%s", driver.String())), g)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't create Tag store: %s", err)
 	}
