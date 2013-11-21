@@ -761,7 +761,7 @@ func (srv *Server) pullImage(r *registry.Registry, out io.Writer, imgID, endpoin
 	if err != nil {
 		return err
 	}
-	out.Write(sf.FormatProgress(utils.TruncateID(imgID), "Pulling", "dependend layers"))
+	out.Write(sf.FormatProgress(utils.TruncateID(imgID), "Pulling", "dependant layers"))
 	// FIXME: Try to stream the images?
 	// FIXME: Launch the getRemoteImage() in goroutines
 
@@ -779,13 +779,13 @@ func (srv *Server) pullImage(r *registry.Registry, out io.Writer, imgID, endpoin
 			out.Write(sf.FormatProgress(utils.TruncateID(id), "Pulling", "metadata"))
 			imgJSON, imgSize, err := r.GetRemoteImageJSON(id, endpoint, token)
 			if err != nil {
-				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
+				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependant layers"))
 				// FIXME: Keep going in case of error?
 				return err
 			}
 			img, err := NewImgJSON(imgJSON)
 			if err != nil {
-				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
+				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependant layers"))
 				return fmt.Errorf("Failed to parse json: %s", err)
 			}
 
@@ -793,12 +793,12 @@ func (srv *Server) pullImage(r *registry.Registry, out io.Writer, imgID, endpoin
 			out.Write(sf.FormatProgress(utils.TruncateID(id), "Pulling", "fs layer"))
 			layer, err := r.GetRemoteImageLayer(img.ID, endpoint, token)
 			if err != nil {
-				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependend layers"))
+				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "pulling dependant layers"))
 				return err
 			}
 			defer layer.Close()
 			if err := srv.runtime.graph.Register(imgJSON, utils.ProgressReader(layer, imgSize, out, sf.FormatProgress(utils.TruncateID(id), "Downloading", "%8v/%v (%v)"), sf, false), img); err != nil {
-				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "downloading dependend layers"))
+				out.Write(sf.FormatProgress(utils.TruncateID(id), "Error", "downloading dependant layers"))
 				return err
 			}
 		}
