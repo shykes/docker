@@ -40,6 +40,8 @@ var (
 		"aufs",
 		"devicemapper",
 		"vfs",
+		// experimental, has to be enabled manually for now
+		"btrfs",
 	}
 )
 
