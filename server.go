@@ -240,7 +240,7 @@ func (srv *Server) ImageExport(name string, out io.Writer) error {
 			}
 
 			// serialize filesystem
-			fs, err := archive.Tar(path.Join(srv.runtime.graph.Root, i.ID, "layer"), archive.Uncompressed)
+			fs, err := i.TarLayer()
 			if err != nil {
 				return err
 			}
