@@ -44,3 +44,14 @@ func getParentIds(root, id string) ([]string, error) {
 	}
 	return out, s.Err()
 }
+
+func getLastLayerIds(root string, parents []string) []string {
+	for i := 0; i < len(parents); i++ {
+		// If this layer had a rootfs, we only return the layers starting here
+		rootfs := path.Join(root, "rootfs", parents[i])
+		if _, err := os.Lstat(rootfs); err == nil {
+			return parents[0 : i+1]
+		}
+	}
+	return parents
+}
