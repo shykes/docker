@@ -1350,15 +1350,21 @@ func (container *Container) GetSize() (int64, int64) {
 		return sizeRw, sizeRootfs
 	}
 
+	gotSize := false
 	if differ, ok := container.runtime.driver.(graphdriver.Differ); ok {
 		sizeRw, err = differ.DiffSize(container.ID)
-		if err != nil {
+		if err == graphdriver.ErrDriverNotImplemented {
+		} else if err != nil {
 			utils.Errorf("Warning: driver %s couldn't return diff size of container %s: %s", driver, container.ID, err)
 			// FIXME: GetSize should return an error. Not changing it now in case
 			// there is a side-effect.
 			sizeRw = -1
+			gotSize = true
+		} else {
+			gotSize = true
 		}
-	} else {
+	}
+	if !gotSize {
 		changes, _ := container.Changes()
 		if changes != nil {
 			sizeRw = archive.ChangesSize(container.RootfsPath(), changes)

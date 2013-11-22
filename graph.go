@@ -154,7 +154,7 @@ func (graph *Graph) Register(jsonData []byte, layerData archive.Archive, img *Im
 	}
 
 	// Create root filesystem in the driver
-	if err := graph.driver.Create(img.ID, img.Parent); err != nil {
+	if err := graph.driver.Create(img.ID, img.Parent, true); err != nil {
 		return fmt.Errorf("Driver %s failed to create image rootfs %s: %s", graph.driver, img.ID, err)
 	}
 	// Mount the root filesystem so we can apply the diff/layer
