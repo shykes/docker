@@ -1,6 +1,7 @@
 package graphdriver
 
 import (
+	"errors"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
 	"github.com/dotcloud/docker/utils"
@@ -9,6 +10,8 @@ import (
 )
 
 var DefaultDriver string
+
+var ErrDriverNotImplemented = errors.New("driver operation not implemented")
 
 type InitFunc func(root string) (Driver, error)
 

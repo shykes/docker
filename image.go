@@ -75,15 +75,20 @@ func StoreImage(img *Image, jsonData []byte, layerData archive.Archive, root, la
 
 	// If layerData is not nil, unpack it into the new layer
 	if layerData != nil {
+		applied := false
 		if differ, ok := driver.(graphdriver.Differ); ok {
 			if err := differ.ApplyDiff(img.ID, layerData); err != nil {
-				return err
+				if err != graphdriver.ErrDriverNotImplemented {
+					return err
+				}
+			} else {
+				applied = true
+				if size, err = differ.DiffSize(img.ID); err != nil {
+					return err
+				}
 			}
-
-			if size, err = differ.DiffSize(img.ID); err != nil {
-				return err
-			}
-		} else {
+		}
+		if !applied {
 			start := time.Now()
 			utils.Debugf("Start untar layer")
 			if err := archive.ApplyLayer(layer, layerData); err != nil {
@@ -150,7 +155,9 @@ func (img *Image) TarLayer() (archive.Archive, error) {
 	}
 	driver := img.graph.driver
 	if differ, ok := driver.(graphdriver.Differ); ok {
-		return differ.Diff(img.ID)
+		if layer, err := differ.Diff(img.ID); err != graphdriver.ErrDriverNotImplemented {
+			return layer, err
+		}
 	}
 
 	imgFs, err := driver.Get(img.ID)

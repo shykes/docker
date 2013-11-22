@@ -749,7 +749,9 @@ func (runtime *Runtime) Unmount(container *Container) error {
 
 func (runtime *Runtime) Changes(container *Container) ([]archive.Change, error) {
 	if differ, ok := runtime.driver.(graphdriver.Differ); ok {
-		return differ.Changes(container.ID)
+		if changes, err := differ.Changes(container.ID); err != graphdriver.ErrDriverNotImplemented {
+			return changes, err
+		}
 	}
 	cDir, err := runtime.driver.Get(container.ID)
 	if err != nil {
@@ -764,7 +766,9 @@ func (runtime *Runtime) Changes(container *Container) ([]archive.Change, error) 
 
 func (runtime *Runtime) Diff(container *Container) (archive.Archive, error) {
 	if differ, ok := runtime.driver.(graphdriver.Differ); ok {
-		return differ.Diff(container.ID)
+		if diff, err := differ.Diff(container.ID); err != graphdriver.ErrDriverNotImplemented {
+			return diff, err
+		}
 	}
 
 	changes, err := runtime.Changes(container)
