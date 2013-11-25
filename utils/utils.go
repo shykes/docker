@@ -237,7 +237,7 @@ func SelfPath() string {
 	return path
 }
 
-func dockerInitSha1(target string) string {
+func DockerInitSha1(target string) string {
 	f, err := os.Open(target)
 	if err != nil {
 		return ""
@@ -266,7 +266,7 @@ func isValidDockerInitPath(target string, selfPath string) bool { // target and 
 		}
 		return os.SameFile(targetFileInfo, selfPathFileInfo)
 	}
-	return INITSHA1 != "" && dockerInitSha1(target) == INITSHA1
+	return INITSHA1 != "" && DockerInitSha1(target) == INITSHA1
 }
 
 // Figure out the path of our dockerinit (which may be SelfPath())
@@ -1291,4 +1291,18 @@ func GetCallerName(depth int) string {
 	parts := strings.Split(callerLongName, ".")
 	callerShortName := parts[len(parts)-1]
 	return callerShortName
+}
+
+func CopyFile(src, dst string) (int64, error) {
+	sf, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer sf.Close()
+	df, err := os.Create(dst)
+	if err != nil {
+		return 0, err
+	}
+	defer df.Close()
+	return io.Copy(df, sf)
 }

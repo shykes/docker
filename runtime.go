@@ -30,6 +30,7 @@ type Capabilities struct {
 
 type Runtime struct {
 	repository     string
+	sysInitPath    string
 	containers     *list.List
 	networkManager *NetworkManager
 	graph          *Graph
@@ -374,11 +375,6 @@ func (runtime *Runtime) Create(config *Config, name string) (*Container, []strin
 		return nil, nil, fmt.Errorf("No command specified")
 	}
 
-	sysInitPath := utils.DockerInitPath()
-	if sysInitPath == "" {
-		return nil, nil, fmt.Errorf("Could not locate dockerinit: This usually means docker was built incorrectly. See http://docs.docker.io/en/latest/contributing/devenvironment for official build instructions.")
-	}
-
 	// Generate id
 	id := GenerateID()
 
@@ -429,7 +425,7 @@ func (runtime *Runtime) Create(config *Config, name string) (*Container, []strin
 		Image:           img.ID, // Always use the resolved image id
 		NetworkSettings: &NetworkSettings{},
 		// FIXME: do we need to store this in the container?
-		SysInitPath: sysInitPath,
+		SysInitPath: runtime.sysInitPath,
 		Name:        name,
 	}
 	container.root = runtime.containerRoot(container.ID)
@@ -631,6 +627,11 @@ func NewRuntimeFromDirectory(config *DaemonConfig) (*Runtime, error) {
 		return nil, err
 	}
 
+	sysInitPath := utils.DockerInitPath()
+	if sysInitPath == "" {
+		return nil, fmt.Errorf("Could not locate dockerinit: This usually means docker was built incorrectly. See http://docs.docker.io/en/latest/contributing/devenvironment for official build instructions.")
+	}
+
 	runtime := &Runtime{
 		repository:     runtimeRepo,
 		containers:     list.New(),
@@ -642,6 +643,19 @@ func NewRuntimeFromDirectory(config *DaemonConfig) (*Runtime, error) {
 		volumes:        volumes,
 		config:         config,
 		containerGraph: graph,
+		sysInitPath:    path.Join(config.Root, fmt.Sprintf(".dockerinit-%s", utils.DockerInitSha1(sysInitPath))),
+	}
+
+	if _, err := os.Stat(runtime.sysInitPath); err != nil && os.IsNotExist(err) {
+		if _, err := utils.CopyFile(sysInitPath, runtime.sysInitPath); err != nil {
+			return nil, err
+		}
+
+		if err := os.Chmod(runtime.sysInitPath, 0700); err != nil {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, err
 	}
 
 	if err := runtime.restore(); err != nil {
