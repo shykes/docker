@@ -1,6 +1,7 @@
 package graphdriver
 
 import (
+	"errors"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
 	"github.com/dotcloud/docker/utils"
@@ -8,12 +9,19 @@ import (
 	"path"
 )
 
+var DefaultDriver string
+
+var ErrDriverNotImplemented = errors.New("driver operation not implemented")
+
 type InitFunc func(root string) (Driver, error)
 
 type Driver interface {
 	String() string
 
-	Create(id, parent string) error
+	// isImage == true means we will not do any writes to files
+	// (only replace them, when constructing images), this means
+	// its safe to use hardlinks for file sharing with the parent
+	Create(id, parent string, isImage bool) error
 	Remove(id string) error
 
 	Get(id string) (dir string, err error)

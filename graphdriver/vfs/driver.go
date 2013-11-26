@@ -43,7 +43,7 @@ func copyDir(src, dst string) error {
 	return nil
 }
 
-func (d *Driver) Create(id string, parent string) error {
+func (d *Driver) Create(id string, parent string, isImage bool) error {
 	dir := d.dir(id)
 	if err := os.MkdirAll(path.Dir(dir), 0700); err != nil {
 		return err

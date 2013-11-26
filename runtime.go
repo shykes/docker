@@ -24,9 +24,6 @@ import (
 	"time"
 )
 
-// Set the max depth to the aufs restriction
-const MaxImageDepth = 42
-
 var defaultDns = []string{"8.8.8.8", "8.8.4.4"}
 
 type Capabilities struct {
@@ -363,17 +360,6 @@ func (runtime *Runtime) Create(config *Config, name string) (*Container, []strin
 		return nil, nil, err
 	}
 
-	// We add 2 layers to the depth because the container's rw and
-	// init layer add to the restriction
-	depth, err := img.Depth()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if depth+2 >= MaxImageDepth {
-		return nil, nil, fmt.Errorf("Cannot create container with more than %d parents", MaxImageDepth)
-	}
-
 	checkDeprecatedExpose := func(config *Config) bool {
 		if config != nil {
 			if config.PortSpecs != nil {
@@ -471,7 +457,7 @@ func (runtime *Runtime) Create(config *Config, name string) (*Container, []strin
 	}
 
 	initID := fmt.Sprintf("%s-init", container.ID)
-	if err := runtime.driver.Create(initID, img.ID); err != nil {
+	if err := runtime.driver.Create(initID, img.ID, false); err != nil {
 		return nil, nil, err
 	}
 	initPath, err := runtime.driver.Get(initID)
@@ -482,7 +468,7 @@ func (runtime *Runtime) Create(config *Config, name string) (*Container, []strin
 		return nil, nil, err
 	}
 
-	if err := runtime.driver.Create(container.ID, initID); err != nil {
+	if err := runtime.driver.Create(container.ID, initID, false); err != nil {
 		return nil, nil, err
 	}
 	resolvConf, err := utils.GetResolvConf()
@@ -763,7 +749,9 @@ func (runtime *Runtime) Unmount(container *Container) error {
 
 func (runtime *Runtime) Changes(container *Container) ([]archive.Change, error) {
 	if differ, ok := runtime.driver.(graphdriver.Differ); ok {
-		return differ.Changes(container.ID)
+		if changes, err := differ.Changes(container.ID); err != graphdriver.ErrDriverNotImplemented {
+			return changes, err
+		}
 	}
 	cDir, err := runtime.driver.Get(container.ID)
 	if err != nil {
@@ -778,7 +766,9 @@ func (runtime *Runtime) Changes(container *Container) ([]archive.Change, error) 
 
 func (runtime *Runtime) Diff(container *Container) (archive.Archive, error) {
 	if differ, ok := runtime.driver.(graphdriver.Differ); ok {
-		return differ.Diff(container.ID)
+		if diff, err := differ.Diff(container.ID); err != graphdriver.ErrDriverNotImplemented {
+			return diff, err
+		}
 	}
 
 	changes, err := runtime.Changes(container)
