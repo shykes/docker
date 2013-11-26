@@ -9,8 +9,9 @@ aufs driver directory structure
 │   └── 3
 ├── diffs  // Content of the layer
 │   ├── 1  // Contains layers that need to be mounted for the id
-│   ├── 2
-│   └── 3
+│   └── 2
+├── rootfs // Content of the layer as a full filesystem
+│   └── 3 // If exists, contains the full fs for all above layers combined
 └── mnt    // Mount points for the rw layers to be mounted
     ├── 1
     ├── 2
@@ -33,6 +34,8 @@ import (
 	"strings"
 )
 
+const MaxAufsDepth = 42
+
 func init() {
 	graphdriver.Register("aufs", Init)
 }
@@ -52,6 +55,7 @@ func Init(root string) (graphdriver.Driver, error) {
 		"mnt",
 		"diff",
 		"layers",
+		"rootfs",
 	}
 
 	// Create the root aufs driver dir and return
@@ -121,9 +125,9 @@ func (a Driver) Exists(id string) bool {
 }
 
 // Three folders are created for each id
-// mnt, layers, and diff
-func (a *Driver) Create(id, parent string) error {
-	if err := a.createDirsFor(id); err != nil {
+// mnt, layers, and diff or rootfs
+func (a *Driver) Create(id, parent string, isImage bool) error {
+	if err := a.createDirsFor(id, "mnt"); err != nil {
 		return err
 	}
 	// Write the layers metadata
@@ -133,6 +137,7 @@ func (a *Driver) Create(id, parent string) error {
 	}
 	defer f.Close()
 
+	var parentIds []string = nil
 	if parent != "" {
 		ids, err := getParentIds(a.rootPath(), parent)
 		if err != nil {
@@ -142,25 +147,52 @@ func (a *Driver) Create(id, parent string) error {
 		if _, err := fmt.Fprintln(f, parent); err != nil {
 			return err
 		}
+		parentIds = append(parentIds, parent)
 		for _, i := range ids {
+			parentIds = append(parentIds, i)
 			if _, err := fmt.Fprintln(f, i); err != nil {
 				return err
 			}
 		}
 	}
-	return nil
-}
 
-func (a *Driver) createDirsFor(id string) error {
-	paths := []string{
-		"mnt",
-		"diff",
+	// Just start with an empty diff
+	if parentIds == nil {
+		return a.createDirsFor(id, "diff")
 	}
 
-	for _, p := range paths {
-		if err := os.MkdirAll(path.Join(a.rootPath(), p, id), 0755); err != nil {
+	lastLayers := getLastLayerIds(a.rootPath(), parentIds)
+
+	// for image layers if we reach the next-to-last possible
+	// layer we recreate a full rootfs so that the next layer can
+	// start over at depth 1. We can't do this on the *last* layer
+	// because we need to be able to create a container layer and
+	// initlayer for it using aufs
+
+	if isImage && len(lastLayers)+1 >= MaxAufsDepth-2 {
+		if err := a.createDirsFor(id, "rootfs"); err != nil {
 			return err
 		}
+		rootfs := path.Join(a.rootPath(), "rootfs", id)
+		for _, parentId := range lastLayers {
+			layer := path.Join(a.rootPath(), "rootfs", parentId)
+			if _, err := os.Lstat(layer); err != nil {
+				layer = path.Join(a.rootPath(), "diff", parentId)
+			}
+			if err := archive.ApplyDirLayer(layer, rootfs, true); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	return a.createDirsFor(id, "diff")
+}
+
+func (a *Driver) createDirsFor(id, dir string) error {
+	if err := os.MkdirAll(path.Join(a.rootPath(), dir, id), 0755); err != nil {
+		return err
 	}
 	return nil
 }
@@ -210,6 +242,12 @@ func (a *Driver) Get(id string) (string, error) {
 		ids = []string{}
 	}
 
+	// If we have a rootfs, use that directly
+	rootfs := path.Join(a.rootPath(), "rootfs", id)
+	if _, err := os.Lstat(rootfs); err == nil {
+		return rootfs, nil
+	}
+
 	// If a dir does not have a parent ( no layers )do not try to mount
 	// just return the diff path to the data
 	out := path.Join(a.rootPath(), "diff", id)
@@ -224,6 +262,10 @@ func (a *Driver) Get(id string) (string, error) {
 
 // Returns an archive of the contents for the id
 func (a *Driver) Diff(id string) (archive.Archive, error) {
+	rootfs := path.Join(a.rootPath(), "rootfs", id)
+	if _, err := os.Lstat(rootfs); err == nil {
+		return nil, graphdriver.ErrDriverNotImplemented
+	}
 	return archive.TarFilter(path.Join(a.rootPath(), "diff", id), &archive.TarOptions{
 		Recursive:   true,
 		Compression: archive.Uncompressed,
@@ -231,15 +273,27 @@ func (a *Driver) Diff(id string) (archive.Archive, error) {
 }
 
 func (a *Driver) ApplyDiff(id string, diff archive.Archive) error {
+	rootfs := path.Join(a.rootPath(), "rootfs", id)
+	if _, err := os.Lstat(rootfs); err == nil {
+		return graphdriver.ErrDriverNotImplemented
+	}
 	return archive.Untar(diff, path.Join(a.rootPath(), "diff", id), nil)
 }
 
 // Returns the size of the contents for the id
 func (a *Driver) DiffSize(id string) (int64, error) {
+	rootfs := path.Join(a.rootPath(), "rootfs", id)
+	if _, err := os.Lstat(rootfs); err == nil {
+		return 0, graphdriver.ErrDriverNotImplemented
+	}
 	return utils.TreeSize(path.Join(a.rootPath(), "diff", id))
 }
 
 func (a *Driver) Changes(id string) ([]archive.Change, error) {
+	rootfs := path.Join(a.rootPath(), "rootfs", id)
+	if _, err := os.Lstat(rootfs); err == nil {
+		return nil, graphdriver.ErrDriverNotImplemented
+	}
 	layers, err := a.getParentLayerPaths(id)
 	if err != nil {
 		return nil, err
@@ -255,10 +309,16 @@ func (a *Driver) getParentLayerPaths(id string) ([]string, error) {
 	if len(parentIds) == 0 {
 		return nil, fmt.Errorf("Dir %s does not have any parent layers", id)
 	}
+
 	layers := make([]string, len(parentIds))
 
-	// Get the diff paths for all the parent ids
+	// Get the diff/rootfs paths for all required the parents
 	for i, p := range parentIds {
+		rootfs := path.Join(a.rootPath(), "rootfs", p)
+		if _, err := os.Lstat(rootfs); err == nil {
+			layers[i] = rootfs
+			return layers[0 : i+1], nil
+		}
 		layers[i] = path.Join(a.rootPath(), "diff", p)
 	}
 	return layers, nil
