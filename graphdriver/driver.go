@@ -9,10 +9,6 @@ import (
 	"path"
 )
 
-var DefaultDriver string
-
-var ErrDriverNotImplemented = errors.New("driver operation not implemented")
-
 type InitFunc func(root string) (Driver, error)
 
 type Driver interface {
@@ -49,6 +45,10 @@ var (
 		"devicemapper",
 		"vfs",
 	}
+)
+
+var (
+	ErrDriverNotImplemented = errors.New("driver operation not implemented")
 )
 
 func init() {

@@ -510,7 +510,7 @@ func TestDriverCreate(t *testing.T) {
 			"DmTaskSetAddNode",
 		)
 
-		if err := d.Create("1", ""); err != nil {
+		if err := d.Create("1", "", true); err != nil {
 			t.Fatal(err)
 		}
 		calls.Assert(t,
@@ -600,7 +600,7 @@ func TestDriverRemove(t *testing.T) {
 			"DmTaskSetAddNode",
 		)
 
-		if err := d.Create("1", ""); err != nil {
+		if err := d.Create("1", "", true); err != nil {
 			t.Fatal(err)
 		}
 
@@ -654,7 +654,7 @@ func TestCleanup(t *testing.T) {
 
 	mountPoints := make([]string, 2)
 
-	if err := d.Create("1", ""); err != nil {
+	if err := d.Create("1", "", true); err != nil {
 		t.Fatal(err)
 	}
 	// Mount the id
@@ -664,7 +664,7 @@ func TestCleanup(t *testing.T) {
 	}
 	mountPoints[0] = p
 
-	if err := d.Create("2", "1"); err != nil {
+	if err := d.Create("2", "1", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -717,7 +717,7 @@ func TestNotMounted(t *testing.T) {
 	d := newDriver(t)
 	defer cleanup(d)
 
-	if err := d.Create("1", ""); err != nil {
+	if err := d.Create("1", "", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -735,7 +735,7 @@ func TestMounted(t *testing.T) {
 	d := newDriver(t)
 	defer cleanup(d)
 
-	if err := d.Create("1", ""); err != nil {
+	if err := d.Create("1", "", true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.Get("1"); err != nil {
@@ -755,7 +755,7 @@ func TestInitCleanedDriver(t *testing.T) {
 	t.Skip("FIXME: not a unit test")
 	d := newDriver(t)
 
-	if err := d.Create("1", ""); err != nil {
+	if err := d.Create("1", "", true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.Get("1"); err != nil {
@@ -783,7 +783,7 @@ func TestMountMountedDriver(t *testing.T) {
 	d := newDriver(t)
 	defer cleanup(d)
 
-	if err := d.Create("1", ""); err != nil {
+	if err := d.Create("1", "", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -802,7 +802,7 @@ func TestGetReturnsValidDevice(t *testing.T) {
 	d := newDriver(t)
 	defer cleanup(d)
 
-	if err := d.Create("1", ""); err != nil {
+	if err := d.Create("1", "", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -830,7 +830,7 @@ func TestDriverGetSize(t *testing.T) {
 	d := newDriver(t)
 	defer cleanup(d)
 
-	if err := d.Create("1", ""); err != nil {
+	if err := d.Create("1", "", true); err != nil {
 		t.Fatal(err)
 	}
 
