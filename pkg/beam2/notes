@@ -1,0 +1,25 @@
+
+* Use ojf for sending KEY=VALUE messages
+
+* To send collections: extend ojf with empty key (similar to kafka key-less messages)
+
+* Use ojf for on-disk database?
+
+* http api supports JSON. Is that a legacy format, or does ojf support multi-format?
+
+* if ojf supports multi-format, how does format negotiation work?
+
+* How to nest a job into a stream? Is there a "control stream"?
+
+
+
+
+
+Beam seeks to supersede the following:
+
+1) docker remote api (communicating with a remote docker daemon)
+2) docker service discovery (a container connecting to other containers)
+3) docker introspection (a container interacting with its docker engine)
+4) application logging (print to stdout / stderr as a special case)
+5) systemd journal logging
+6) systemd socket activation
