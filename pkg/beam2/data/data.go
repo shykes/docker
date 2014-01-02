@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"fmt"
 	"strings"
-	"strconv"
 )
 
 type StructuredStream interface {
@@ -33,11 +32,6 @@ func (m Msg) Get(k string) string {
 		return values[0]
 	}
 	return ""
-}
-
-func (m Msg) GetInt(k string) (int64, error) {
-	s := strings.Trim(m.Get(k), " \t")
-	return strconv.ParseInt(s, 10, 64)
 }
 
 func (m Msg) Set(k, v string) {
