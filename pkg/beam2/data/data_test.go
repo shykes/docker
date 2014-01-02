@@ -5,7 +5,7 @@ import (
 )
 
 func TestMsgAddGet(t *testing.T) {
-	m := make(StructuredMessage)
+	m := make(Msg)
 	m.Add("foo", "bar")
 	if v := m.Get("foo"); v != "bar" {
 		t.Fatalf("Unexpected value: %v", v)
@@ -13,7 +13,7 @@ func TestMsgAddGet(t *testing.T) {
 }
 
 func TestMsgSetGet(t *testing.T) {
-	m := make(StructuredMessage)
+	m := make(Msg)
 	m.Set("foo", "bar")
 	if v := m.Get("foo"); v != "bar" {
 		t.Fatalf("Unexpected value: %v", v)
@@ -21,7 +21,7 @@ func TestMsgSetGet(t *testing.T) {
 }
 
 func TestMsgGetNonexistent(t *testing.T) {
-	m := make(StructuredMessage)
+	m := make(Msg)
 	m.Set("foo", "bar")
 	if v := m.Get("somethingelse"); v != "" {
 		t.Fatalf("Unexpected value: %v", v)
@@ -29,7 +29,7 @@ func TestMsgGetNonexistent(t *testing.T) {
 }
 
 func TestMsgArrays(t *testing.T) {
-	m := make(StructuredMessage)
+	m := make(Msg)
 	m.Add("foo", "ga")
 	m.Add("foo", "bu")
 	m.Add("foo", "zo")
