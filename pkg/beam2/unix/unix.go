@@ -126,16 +126,18 @@ func (t *Transport) ReceiveStream() (stream *Stream, e error) {
 				fmt.Printf("Skipping invalid stream information (%d bytes)\n", len(buf))
 				continue
 			}
+			fmt.Printf("stream info = %v\n", info)
 			// FInd and validate the parent stream, if specified.
 			var parent *Stream
 			if info.Exists("parent-id") {
+				fmt.Printf("parent-id exists, parsing\n")
 				if parentId64, err := info.GetInt("parent-id"); err != nil {
-					fmt.Printf("Rejecting invalid stream parent-id: %s", err)
+					fmt.Printf("Rejecting invalid stream parent-id: %s\n", err)
 					continue
 				} else {
 					parent = t.Get(uint32(parentId64))
 					if parent == nil {
-						fmt.Printf("Rejecting stream with non-existent parent-id %d", parentId64)
+						fmt.Printf("Rejecting stream with non-existent parent-id %d\n", parentId64)
 						continue
 					}
 				}
@@ -144,7 +146,7 @@ func (t *Transport) ReceiveStream() (stream *Stream, e error) {
 			var header http.Header
 			if info.Exists("header") {
 				if headerData, err := info.GetMsg("heder"); err != nil {
-					fmt.Printf("Rejecting stream with invalid header (%d bytes)", len(info.Get("header")))
+					fmt.Printf("Rejecting stream with invalid header (%d bytes)\n", len(info.Get("header")))
 					continue
 				} else {
 					header = headerData.ToHTTPHeader()
@@ -153,7 +155,7 @@ func (t *Transport) ReceiveStream() (stream *Stream, e error) {
 			// Validate the stream id.
 			var id uint32
 			if id64, err := info.GetUint("id"); err != nil {
-				fmt.Printf("Skipping invalid stream id: %s", err)
+				fmt.Printf("Skipping invalid stream id: %s\n", err)
 				continue
 			} else {
 				id = uint32(id64)
@@ -163,7 +165,7 @@ func (t *Transport) ReceiveStream() (stream *Stream, e error) {
 			s.parent = parent
 			s.header = header
 			if err := t.Set(id, s, true); err != nil {
-				fmt.Printf("Rejecting invalid stream id: %s", err)
+				fmt.Printf("Rejecting invalid stream id: %s\n", err)
 				continue
 			}
 			return s, nil
