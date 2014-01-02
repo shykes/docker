@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	sock, server, err := connect(".beam.sock")
+	sock, server, err := connectGram(".beam.sock")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -86,8 +86,28 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 	}
 }
 
+func connectStream(filename string) (conn *net.UnixConn, server bool, err error) {
+	addr, err := net.ResolveUnixAddr("unix", filename)
+	if err != nil {
+		return nil, false, fmt.Errorf("resolveaddr: %s", err)
+	}
+	conn, err = net.DialUnix("unix", nil, addr)
+	if err != nil {
+		os.Remove(filename)
+		l, err := net.ListenUnix("unix", addr)
+		if err != nil {
+			return nil, false, fmt.Errorf("listen: %s", err)
+		}
+		conn, err := l.AcceptUnix()
+		if err != nil {
+			return nil, false, fmt.Errorf("accept: %s", err)
+		}
+		return conn, true, nil
+	}
+	return conn, false, nil
+}
 
-func connect(filename string) (conn *net.UnixConn, server bool, err error) {
+func connectGram(filename string) (conn *net.UnixConn, server bool, err error) {
 	addr, err := net.ResolveUnixAddr("unixgram", filename)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolveaddr: %s", err)
