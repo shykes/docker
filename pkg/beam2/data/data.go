@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"bufio"
+	"bytes"
 	"fmt"
 	"strings"
 )
@@ -34,6 +35,18 @@ func (m Msg) Get(k string) string {
 	return ""
 }
 
+func (m Msg) String() string {
+	var buf bytes.Buffer
+	m.WriteTo(&buf)
+	return buf.String()
+}
+
+func (m Msg) Exists(k string) bool {
+	_, exists := m[k]
+	return exists
+}
+
+
 func (m Msg) Set(k, v string) {
 	m[k] = []string{v}
 }
@@ -55,6 +68,8 @@ func (m Msg) WriteTo(dst io.Writer) (written int64, err error) {
 				// - the size (in 64bit little endian format)
 				// - the data, followed by a newline
 				//
+				// FIXME: use spdy-style null-byte separation to send arrays
+				// without repeating the keys.
 				n, err = fmt.Fprintln(dst, key)
 				written += int64(n)
 				if err != nil {
