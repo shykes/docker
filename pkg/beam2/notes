@@ -23,3 +23,40 @@ Beam seeks to supersede the following:
 4) application logging (print to stdout / stderr as a special case)
 5) systemd journal logging
 6) systemd socket activation
+
+
+-----
+
+- Is it practical to name channels?
+
+	-> is the namespace shared across both peers?
+	-> If so, can we enforce unicity? What about race conditions?
+
+
+----
+
+- How to organize the streams API?
+
+	-> Constraints:
+		- Performance: allow mapping to FDs when possible
+		- Transparency: allow full use of FDs by the application when possible
+			(including oob unix socket msgs etc.)
+		- Convenience to transport implementor (keep very little code in the "language X transport" matrix)
+		- Easy to use with the language standard library (io.ReadWriter etc.)
+		- Nesting. Expose enough transport specifics to reduce the overhead of nesting (ie. use message transport when it exists)
+
+
+----
+
+TRANSPORT:
+
+	- Session can send and receive streams
+	- Stream can read and write ordered bytes (and optionally preserve frame boundaries)
+	- Stream can send and receive key-value userdata
+	- Streams are uniquely identified by their id.
+	- The same id used on either side references the same stream
+	- ID allocation follows the SPDY protocol.
+	- A stream can depend on a previous stream
+
+If metadata is in a separate fd, how do we represent initial headers? (ie headers which may be required to start
+processing the stream)
