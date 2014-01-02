@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -86,7 +85,7 @@ func (t *Transport) Get(id uint32) *Stream {
 
 func Receive(conn *net.UnixConn) (data []byte, fds []int, err error) {
 	defer func() {
-		fmt.Printf("Receive(): data='%v', fds='%v', err='%v'\n", data, fds, err)
+		fmt.Printf("Receive(): data='%s', fds='%v', err='%v'\n", data, fds, err)
 	}()
 	buf := make([]byte, 4096)
 	oob := make([]byte, 4096)
@@ -159,18 +158,12 @@ func (t *Transport) ReceiveStream() (*Stream, error) {
 			}
 			// Validate the stream id.
 			var id uint32
-			id, err = t.idsIn.next()
-			if err != nil {
-				log.Fatalf("next id: %s", err)
-			}
-			/*
 			if id64, err := info.GetUint("id"); err != nil {
 				fmt.Printf("Skipping invalid stream id: %s", err)
 				continue
 			} else {
 				id = uint32(id64)
 			}
-			*/
 			s := t.newStream(fd, metaFd)
 			s.id = id
 			s.parent = parent
@@ -224,12 +217,14 @@ func (t *Transport) SendStream() (stream *Stream, err error) {
 			syscall.Close(pair[1])
 		}
 	}()
-	if err := Send(t.conn, []byte{}, []int{pair[0]}); err != nil {
-		return nil, err
-	}
 	s := t.newStream(pair[1], -1)
 	// Register the new stream, setting id to 0 to auto-assign
 	if err := t.Set(0, s, false); err != nil {
+		return nil, err
+	}
+	info := make(data.Msg)
+	info.SetInt("id", int64(s.id))
+	if err := Send(t.conn, info.Bytes(), []int{pair[0]}); err != nil {
 		return nil, err
 	}
 	return s, nil

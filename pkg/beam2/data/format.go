@@ -1,6 +1,7 @@
 package data
 
 import (
+	"fmt"
 	"strconv"
 	"net/http"
 	"sort"
@@ -10,6 +11,10 @@ import (
 func (m Msg) GetInt(k string) (int64, error) {
 	s := strings.Trim(m.Get(k), " \t")
 	return strconv.ParseInt(s, 10, 64)
+}
+
+func (m Msg) SetInt(k string, v int64) {
+	m.Set(k, fmt.Sprintf("%d", v))
 }
 
 

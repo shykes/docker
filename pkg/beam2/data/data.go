@@ -36,9 +36,14 @@ func (m Msg) Get(k string) string {
 }
 
 func (m Msg) String() string {
+	return string(m.Bytes())
+}
+
+func (m Msg) Bytes() []byte {
 	var buf bytes.Buffer
 	m.WriteTo(&buf)
-	return buf.String()
+	return buf.Bytes()
+
 }
 
 func (m Msg) Exists(k string) bool {
