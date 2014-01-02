@@ -41,7 +41,7 @@ func handleUserInput(src io.Reader, t *unix.Transport) {
 		if err := input.Err(); err != nil {
 			log.Fatal("stdin: %s", err)
 		}
-		st, err := t.SendStream()
+		st, err := t.SendStream(nil)
 		if err != nil {
 			log.Fatalf("sendstream: %s", err)
 		}
@@ -69,6 +69,10 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 		if err != nil {
 			log.Fatalf("receivestream: %s", err)
 		}
+		if st.Parent() != nil {
+			go io.Copy(os.Stdout, st)
+			continue
+		}
 		scanner := bufio.NewScanner(st)
 		scanner.Scan()
 		if err := scanner.Err(); err != nil {
@@ -78,12 +82,23 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 		wg.Add(1)
 		go func() {
 			cmd := exec.Command("sh", "-c", scanner.Text())
-			cmd.Stdout = st
-			cmd.Stderr = st
+			stdout, err := t.SendStream(st)
+			if err != nil {
+				return
+			}
+			stderr, err := t.SendStream(st)
+			if err != nil {
+				return
+			}
+			cmd.Stdout = stdout
+			cmd.Stderr = stderr
 			if err := cmd.Run(); err != nil {
 				fmt.Fprintf(st, "error: %s\n", err)
 			}
+			fmt.Fprintf(st, "status=%s\n", cmd.ProcessState)
 			st.Close()
+			stdout.Close()
+			stderr.Close()
 		}()
 	}
 }

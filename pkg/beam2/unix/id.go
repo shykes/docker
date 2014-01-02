@@ -9,7 +9,7 @@ type IdCounter struct {
 	last uint32
 }
 
-func (c *IdCounter) Register(id uint32) (uint32, error) {
+func (c *IdCounter) Register(id uint32) (actualId uint32, err error) {
 	next, err := c.next()
 	if err != nil {
 		return 0, err

@@ -71,7 +71,7 @@ func (t *Transport) Set(id uint32, stream *Stream, inbound bool) error {
 		return fmt.Errorf("stream already exists: %d", id)
 	}
 	stream.id = actualId
-	t.streams[id] = stream
+	t.streams[actualId] = stream
 	return nil
 }
 
@@ -83,9 +83,6 @@ func (t *Transport) Get(id uint32) *Stream {
 }
 
 func Receive(conn *net.UnixConn) (data []byte, fds []int, err error) {
-	defer func() {
-		fmt.Printf("Receive(): data='%s', fds='%v', err='%v'\n", data, fds, err)
-	}()
 	buf := make([]byte, 4096)
 	oob := make([]byte, 4096)
 	bufn, oobn, _, _, err := conn.ReadMsgUnix(buf, oob)
@@ -98,17 +95,15 @@ func Receive(conn *net.UnixConn) (data []byte, fds []int, err error) {
 }
 
 func Send(conn *net.UnixConn, data []byte, fds[]int) (err error) {
-	var n int
-	defer func() {
-		fmt.Printf("Send(data='%s', fds='%v') err='%v' n=%v\n", data, fds, err, n)
-	}()
-	n, _, err = conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
+	_, _, err = conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
 	return err
 }
 
-func (t *Transport) ReceiveStream() (*Stream, error) {
+func (t *Transport) ReceiveStream() (stream *Stream, e error) {
+	defer func() {
+		fmt.Printf("received stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), e)
+	}()
 	for {
-		fmt.Printf("Reading message\n")
 		buf, fds, err := Receive(t.conn)
 		if err != nil {
 			return nil, fmt.Errorf("receive: %s", err)
@@ -186,7 +181,10 @@ func (t *Transport) newStream(fd, metaFd int) *Stream {
 	}
 }
 
-func (t *Transport) SendStream() (stream *Stream, err error) {
+func (t *Transport) SendStream(parent *Stream) (stream *Stream, err error) {
+	defer func() {
+		fmt.Printf("sent stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), err)
+	}()
 	// Our transport must guarantee both 1) ordered delivery of octet streams
 	// and 2) protected message boundaries.
 	// We have the following options:
@@ -217,12 +215,17 @@ func (t *Transport) SendStream() (stream *Stream, err error) {
 		}
 	}()
 	s := t.newStream(pair[1], -1)
+	s.parent = parent
 	// Register the new stream, setting id to 0 to auto-assign
 	if err := t.Set(0, s, false); err != nil {
 		return nil, err
 	}
+	// Generate info message
 	info := make(data.Msg)
 	info.SetInt("id", int64(s.id))
+	if p := s.Parent(); p != nil {
+		info.SetInt("parent-id", int64(p.Id()))
+	}
 	if err := Send(t.conn, info.Bytes(), []int{pair[0]}); err != nil {
 		return nil, err
 	}
@@ -252,4 +255,8 @@ func (s *Stream) Metadata() data.StructuredStream {
 
 func (s *Stream) Id() int {
 	return int(s.id)
+}
+
+func (s *Stream) Parent() *Stream {
+	return s.parent
 }
