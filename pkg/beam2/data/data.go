@@ -10,16 +10,16 @@ import (
 )
 
 type StructuredStream interface {
-	Send(StructuredMessage) error
-	Receive() (StructuredMessage, error)
+	Send(Msg) error
+	Receive() (Msg, error)
 	Close() error
 }
 
 // A map of string arrays fits our needs for a structured message type neatly.
 // It stores multiple values per key, so it can be used to carry scalars and arrays.
-type StructuredMessage map[string][]string
+type Msg map[string][]string
 
-func (m StructuredMessage) Add(k, v string) {
+func (m Msg) Add(k, v string) {
 	values, exists := m[k]
 	if !exists {
 		m[k] = []string{v}
@@ -28,27 +28,27 @@ func (m StructuredMessage) Add(k, v string) {
 	}
 }
 
-func (m StructuredMessage) Get(k string) string {
+func (m Msg) Get(k string) string {
 	if values, exists := m[k]; exists && len(values) >= 1 {
 		return values[0]
 	}
 	return ""
 }
 
-func (m StructuredMessage) GetInt(k string) (int64, error) {
+func (m Msg) GetInt(k string) (int64, error) {
 	s := strings.Trim(m.Get(k), " \t")
 	return strconv.ParseInt(s, 10, 64)
 }
 
-func (m StructuredMessage) Set(k, v string) {
+func (m Msg) Set(k, v string) {
 	m[k] = []string{v}
 }
 
-func (m StructuredMessage) Del(k string) {
+func (m Msg) Del(k string) {
 	delete(m, k)
 }
 
-func (m StructuredMessage) WriteTo(dst io.Writer) (written int64, err error) {
+func (m Msg) WriteTo(dst io.Writer) (written int64, err error) {
 	var n int
 	for key, values := range m {
 		for _, value := range values {
@@ -87,9 +87,9 @@ func (m StructuredMessage) WriteTo(dst io.Writer) (written int64, err error) {
 	return
 }
 
-func (m StructuredMessage) ReadFrom(src io.Reader) (read int64, err error) {
+func (m Msg) ReadFrom(src io.Reader) (read int64, err error) {
 	scanner := bufio.NewScanner(src)
-	scanner.Split(scanStructuredMessage)
+	scanner.Split(scanMsg)
 	for scanner.Scan() {
 		entry := scanner.Text()
 		nl := strings.Index(entry, "\n")
@@ -111,7 +111,7 @@ func (m StructuredMessage) ReadFrom(src io.Reader) (read int64, err error) {
 }
 
 
-func scanStructuredMessage(data []byte, atEOF bool) (advance int, token []byte, err error) {
+func scanMsg(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	s := string(data)
 	if atEOF && len(s) == 0 {
 		return 0, nil, nil
