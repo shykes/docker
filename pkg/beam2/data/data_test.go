@@ -2,6 +2,7 @@ package data
 
 import (
 	"testing"
+	"strings"
 )
 
 func TestMsgAddGet(t *testing.T) {
@@ -25,6 +26,20 @@ func TestMsgGetNonexistent(t *testing.T) {
 	m.Set("foo", "bar")
 	if v := m.Get("somethingelse"); v != "" {
 		t.Fatalf("Unexpected value: %v", v)
+	}
+}
+
+func TestMsgReadFrom(t *testing.T) {
+	m := make(Msg)
+	_, err := m.ReadFrom(strings.NewReader("id=3\nparent-id=42\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exp := m.Get("id"); exp != "3" {
+		t.Fatalf("Unexpected value: %v", exp)
+	}
+	if exp := m.Get("parent-id"); exp != "42" {
+		t.Fatalf("Unexpected value: %v", exp)
 	}
 }
 

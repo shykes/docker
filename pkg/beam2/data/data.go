@@ -120,6 +120,10 @@ func (m Msg) ReadFrom(src io.Reader) (read int64, err error) {
 			m.Add(entry[:nl], entry[nl + 1 + 8:])
 		}
 		read += int64(len(entry))
+		err = scanner.Err()
+		if err != nil {
+			return
+		}
 	}
 	return
 }
@@ -141,7 +145,7 @@ func scanMsg(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	}
 	// If the line is a simple text entry (<key>=<val>\n), we're done.
 	if strings.ContainsRune(s[:eol], '=') {
-		return eol, data[:eol], nil
+		return eol + 1, data[:eol], nil
 	}
 	// Parse a binary entry (<key>\n<size><value>\n)
 	if len(s) < eol + 1 + 8 {
