@@ -41,7 +41,7 @@ func handleUserInput(src io.Reader, t *unix.Transport) {
 		if err := input.Err(); err != nil {
 			log.Fatal("stdin: %s", err)
 		}
-		st, err := t.SendStream(0)
+		st, err := t.SendStream()
 		if err != nil {
 			log.Fatalf("sendstream: %s", err)
 		}
@@ -64,7 +64,7 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for {
-		st, err := t.ReceiveStream(0)
+		st, err := t.ReceiveStream()
 		if err != nil {
 			log.Fatalf("receivestream: %s", err)
 		}

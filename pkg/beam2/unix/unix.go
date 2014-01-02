@@ -26,7 +26,6 @@ type Stream struct {
 	fd int
 	data io.ReadWriteCloser
 	metaFd int
-	flag int
 	transport *Transport
 }
 
@@ -108,7 +107,7 @@ func Send(conn *net.UnixConn, data []byte, fds[]int) (err error) {
 	return err
 }
 
-func (t *Transport) ReceiveStream(flag int) (*Stream, error) {
+func (t *Transport) ReceiveStream() (*Stream, error) {
 	for {
 		fmt.Printf("Reading message\n")
 		buf, fds, err := Receive(t.conn)
@@ -175,7 +174,6 @@ func (t *Transport) ReceiveStream(flag int) (*Stream, error) {
 			s.id = id
 			s.parent = parent
 			s.header = header
-			s.flag = flag
 			if err := t.Set(id, s, true); err != nil {
 				fmt.Printf("Rejecting invalid stream id: %s", err)
 				continue
@@ -195,7 +193,7 @@ func (t *Transport) newStream(fd, metaFd int) *Stream {
 	}
 }
 
-func (t *Transport) SendStream(flag int) (stream *Stream, err error) {
+func (t *Transport) SendStream() (stream *Stream, err error) {
 	// Our transport must guarantee both 1) ordered delivery of octet streams
 	// and 2) protected message boundaries.
 	// We have the following options:
@@ -228,9 +226,7 @@ func (t *Transport) SendStream(flag int) (stream *Stream, err error) {
 	if err := Send(t.conn, []byte{}, []int{pair[0]}); err != nil {
 		return nil, err
 	}
-	// FIXME: enforce flags directly on the fd with fcntl.
 	s := t.newStream(pair[1], -1)
-	s.flag = flag
 	// Register the new stream, setting id to 0 to auto-assign
 	if err := t.Set(0, s, false); err != nil {
 		return nil, err
