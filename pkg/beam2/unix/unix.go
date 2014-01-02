@@ -90,7 +90,7 @@ func Receive(conn *net.UnixConn) (data []byte, fds []int, err error) {
 	}()
 	buf := make([]byte, 4096)
 	oob := make([]byte, 4096)
-	bufn, oobn, _, _, err := conn.ReadMsgUnix(data, oob)
+	bufn, oobn, _, _, err := conn.ReadMsgUnix(buf, oob)
 	if err != nil {
 		return nil, nil, fmt.Errorf("readmsg: %s", err)
 	}
@@ -100,10 +100,11 @@ func Receive(conn *net.UnixConn) (data []byte, fds []int, err error) {
 }
 
 func Send(conn *net.UnixConn, data []byte, fds[]int) (err error) {
+	var n int
 	defer func() {
-		fmt.Printf("Send(data='%v', fds='%v') err='%v'\n", data, fds, err)
+		fmt.Printf("Send(data='%s', fds='%v') err='%v' n=%v\n", data, fds, err, n)
 	}()
-	_, _, err = conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
+	n, _, err = conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
 	return err
 }
 
@@ -126,7 +127,7 @@ func (t *Transport) ReceiveStream() (*Stream, error) {
 			} else {
 				metaFd = -1
 			}
-			var info data.Msg
+			info := make(data.Msg)
 			if _, err := info.ReadFrom(bytes.NewReader(buf)); err != nil {
 				// Invalid stream information. Skip this message.
 				fmt.Printf("Skipping invalid stream information (%d bytes)\n", len(buf))
