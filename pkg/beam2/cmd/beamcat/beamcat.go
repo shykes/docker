@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"strings"
+	"net/http"
 	"log"
 	"github.com/dotcloud/docker/pkg/beam2/unix"
 )
@@ -81,7 +83,7 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 		fmt.Printf("---> %s\n", scanner.Text())
 		wg.Add(1)
 		go func() {
-			cmd := exec.Command("sh", "-c", scanner.Text())
+			words := strings.Split(scanner.Text(), " ")
 			stdout, err := t.SendStream(st)
 			if err != nil {
 				return
@@ -90,12 +92,30 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 			if err != nil {
 				return
 			}
-			cmd.Stdout = stdout
-			cmd.Stderr = stderr
-			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(st, "error: %s\n", err)
+			if words[0] == "download" {
+				if len(words) < 2 {
+					fmt.Fprintf(stderr, "Error: please specify a url\n")
+					fmt.Fprintf(st, "status=1\n")
+				} else {
+					fmt.Fprintf(stderr, "Downloading from %s\n", words[1])
+					resp, err := http.Get(words[1])
+					if err != nil {
+						fmt.Fprintf(stderr, "get: %s\n", err)
+						fmt.Fprintf(st, "status=2\n")
+					} else {
+						fmt.Fprintf(stderr, "%s\n", resp.Status)
+						io.Copy(stdout, resp.Body)
+					}
+				}
+			} else {
+				cmd := exec.Command("sh", "-c", scanner.Text())
+				cmd.Stdout = stdout
+				cmd.Stderr = stderr
+				if err := cmd.Run(); err != nil {
+					fmt.Fprintf(st, "error: %s\n", err)
+				}
+				fmt.Fprintf(st, "status=%s\n", cmd.ProcessState)
 			}
-			fmt.Fprintf(st, "status=%s\n", cmd.ProcessState)
 			st.Close()
 			stdout.Close()
 			stderr.Close()
