@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"io"
+	"syscall"
 )
 
 const FILENAME string = ".example0.sock"
@@ -19,7 +20,17 @@ func main() {
 	fmt.Printf("server=%v\n", server)
 	if server {
 		fmt.Printf("Reading from socket...\n")
-		if _, err := io.Copy(os.Stdout, conn); err != nil {
+		_, fds, err := Receive(conn)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "receive: %s\n", err)
+			os.Exit(1)
+
+		}
+		if len(fds) < 1 {
+			fmt.Fprintf(os.Stderr, "receive: no fd received\n")
+			os.Exit(1)
+		}
+		if _, err := io.Copy(os.Stdout, os.NewFile(uintptr(fds[0]), "peer")); err != nil {
 			fmt.Fprintf(os.Stderr, "copy: %s\n", err)
 			os.Exit(1)
 		}
@@ -31,8 +42,8 @@ func main() {
 			os.Exit(1)
 		}
 		defer f.Close()
-		if _, err := io.Copy(conn, f); err != nil {
-			fmt.Fprintf(os.Stderr, "copy: %s\n", err)
+		if err := Send(conn, []byte{}, []int{int(f.Fd())}); err != nil {
+			fmt.Fprintf(os.Stderr, "send: %s\n", err)
 			os.Exit(1)
 		}
 	}
@@ -55,3 +66,35 @@ func connect(filename string) (conn *net.UnixConn, server bool, err error) {
 	}
 	return conn, false, nil
 }
+
+func Receive(conn *net.UnixConn) (data []byte, fds []int, err error) {
+	var oob []byte = make([]byte, 4096)
+	data = make([]byte, 4096)
+	_, oobn, _, _, err := conn.ReadMsgUnix(data, oob)
+	if err != nil {
+		return nil, nil, fmt.Errorf("readmsg: %s", err)
+	}
+	fds = extractFds(oob[:oobn])
+	return
+}
+
+func Send(conn *net.UnixConn, data []byte, fds[]int) error {
+	_, _, err := conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
+	return err
+}
+
+func extractFds(oob []byte) (fds []int) {
+	scms, err := syscall.ParseSocketControlMessage(oob)
+	if err != nil {
+		return
+	}
+	for _, scm := range scms {
+		gotFds, err := syscall.ParseUnixRights(&scm)
+		if err != nil {
+			continue
+		}
+		fds = append(fds, gotFds...)
+	}
+	return
+}
+
