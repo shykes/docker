@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	sock, server, err := connectGram(".beam.sock")
+	sock, server, err := connectStream(".beam.sock")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -54,6 +54,7 @@ func handleUserInput(src io.Reader, t *unix.Transport) {
 			if err != nil {
 				log.Printf("Error reading from stream: %s", err)
 			}
+			fmt.Printf("[%d] Closed\n", st.Id())
 			wg.Done()
 		}()
 	}
@@ -82,6 +83,7 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 			if err := cmd.Run(); err != nil {
 				fmt.Fprintf(st, "error: %s\n", err)
 			}
+			st.Close()
 		}()
 	}
 }

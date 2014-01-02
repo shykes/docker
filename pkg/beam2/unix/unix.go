@@ -37,7 +37,6 @@ func New(conn *net.UnixConn, server bool) *Transport {
 	}
 }
 
-
 func extractFds(oob []byte) (fds []int) {
 	scms, err := syscall.ParseSocketControlMessage(oob)
 	if err != nil {
@@ -249,4 +248,8 @@ func (s *Stream) Close() error {
 func (s *Stream) Metadata() data.StructuredStream {
 	// FIXME
 	return nil
+}
+
+func (s *Stream) Id() int {
+	return int(s.id)
 }
