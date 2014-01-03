@@ -101,7 +101,7 @@ func Send(conn *net.UnixConn, data []byte, fds[]int) (err error) {
 
 func (t *Transport) ReceiveStream() (stream *Stream, e error) {
 	defer func() {
-		fmt.Printf("received stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), e)
+		// fmt.Printf("received stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), e)
 	}()
 	for {
 		buf, fds, err := Receive(t.conn)
@@ -185,7 +185,7 @@ func (t *Transport) newStream(fd, metaFd int) *Stream {
 
 func (t *Transport) SendStream(parent *Stream) (stream *Stream, err error) {
 	defer func() {
-		fmt.Printf("sent stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), err)
+		// fmt.Printf("sent stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), err)
 	}()
 	// Our transport must guarantee both 1) ordered delivery of octet streams
 	// and 2) protected message boundaries.

@@ -52,7 +52,7 @@ func handleUserInput(src io.Reader, t *unix.Transport) {
 		}
 		wg.Add(1)
 		go func() {
-			_, err := io.Copy(os.Stdout, st)
+			err := copyLines(os.Stdout, st, fmt.Sprintf("[%d] ", st.Id()))
 			if err != nil {
 				log.Printf("Error reading from stream: %s", err)
 			}
@@ -60,6 +60,21 @@ func handleUserInput(src io.Reader, t *unix.Transport) {
 			wg.Done()
 		}()
 	}
+}
+
+func copyLines(dst io.Writer, src io.Reader, prefix string) error {
+	scanner := bufio.NewScanner(src)
+	for scanner.Scan() {
+		if line := scanner.Text(); line != "" {
+			if _, err := fmt.Fprintf(dst, "%s%s\n", prefix, line); err != nil {
+				return err
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func handleRequests(t *unix.Transport, dst io.Writer) {
@@ -72,7 +87,7 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 			log.Fatalf("receivestream: %s", err)
 		}
 		if st.Parent() != nil {
-			go io.Copy(os.Stdout, st)
+			go copyLines(os.Stdout, st, fmt.Sprintf("[%d] ", st.Id()))
 			continue
 		}
 		scanner := bufio.NewScanner(st)
