@@ -249,6 +249,7 @@ func (s *Stream) Close() error {
 	if s.local == nil {
 		return fmt.Errorf("close: local endpoint not available")
 	}
+	s.local.Sync()
 	return s.local.Close()
 }
 
