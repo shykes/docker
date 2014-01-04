@@ -195,17 +195,38 @@ func jobListen(job *Job) {
 		}
 		job.Stderr.Printf("New connection from %s\n", conn.RemoteAddr())
 		st := job.New()
+		fConn, hasFile := conn.(HasFile)
+		if hasFile {
+			f, err := fConn.File()
+			if err != nil {
+				job.Stderr.Printf("can't get connection file descriptor: %s", err)
+				conn.Close()
+				continue
+			}
+			st.SetFile(f)
+		}
+		// FIXME: since we're passing the socket file descriptor,
+		// we can't intercept close events so st.Close will never be called.
+		// This doesn't matter for the data channel, because the real fd itself will
+		// be closed. However, if metadata is sent on a separate fd, how will that be closed?
 		if err := st.Send(); err != nil {
 			job.Stderr.Printf("send: %s\n", err)
 			job.Printf("status=1\n")
 			return
 		}
-		go func() {
-			Splice(st, conn)
-			conn.Close()
-			st.Close()
-		}()
+		if !hasFile {
+			go func() {
+				st.Printf("---> Splice\n")
+				Splice(st, conn)
+				conn.Close()
+				st.Close()
+			}()
+		}
 	}
+}
+
+type HasFile interface {
+	File() (*os.File, error)
 }
 
 func Splice(a, b io.ReadWriter) (err error) {
