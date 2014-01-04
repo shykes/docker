@@ -57,6 +57,7 @@ func handleUserInput(src io.Reader, t *unix.Transport) {
 			if err != nil {
 				log.Printf("Error reading from stream: %s", err)
 			}
+			job.Close()
 			fmt.Printf("[%d] [%s] Closed\n", job.Id(), cmdline)
 			wg.Done()
 		}(input.Text())
@@ -92,6 +93,7 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 				prefix := fmt.Sprintf("[%d/%d] ", st.Parent().Id(), st.Id())
 				copyLines(os.Stdout, st, prefix)
 				fmt.Printf("%sClosed\n", prefix)
+				st.Close()
 			}()
 			continue
 		}
