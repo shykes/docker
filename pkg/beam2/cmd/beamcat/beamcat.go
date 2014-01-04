@@ -88,7 +88,11 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 			log.Fatalf("receive: %s", err)
 		}
 		if st.Parent() != nil {
-			go copyLines(os.Stdout, st, fmt.Sprintf("[%d/%d] ", st.Parent().Id(), st.Id()))
+			go func() {
+				prefix := fmt.Sprintf("[%d/%d] ", st.Parent().Id(), st.Id())
+				copyLines(os.Stdout, st, prefix)
+				fmt.Printf("%sClosed\n", prefix)
+			}()
 			continue
 		}
 		scanner := bufio.NewScanner(st)
