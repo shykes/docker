@@ -3,7 +3,6 @@ package unix
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -22,9 +21,10 @@ type Stream struct {
 	id uint32
 	parent *Stream
 	header http.Header
-	fd int
-	data io.ReadWriteCloser
-	metaFd int
+	local *os.File
+	remote *os.File
+	metaLocal *os.File
+	metaRemote *os.File
 	transport *Transport
 }
 
@@ -99,7 +99,7 @@ func Send(conn *net.UnixConn, data []byte, fds[]int) (err error) {
 	return err
 }
 
-func (t *Transport) ReceiveStream() (stream *Stream, e error) {
+func (t *Transport) Receive() (stream *Stream, e error) {
 	defer func() {
 		// fmt.Printf("received stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), e)
 	}()
@@ -160,9 +160,10 @@ func (t *Transport) ReceiveStream() (stream *Stream, e error) {
 			} else {
 				id = uint32(id64)
 			}
-			s := t.newStream(fd, metaFd)
+			s := t.New(parent)
 			s.id = id
-			s.parent = parent
+			s.local = os.NewFile(uintptr(fd), fmt.Sprintf("%d", fd))
+			s.metaLocal = os.NewFile(uintptr(metaFd), fmt.Sprintf("%d", fd))
 			s.header = header
 			if err := t.Set(id, s, true); err != nil {
 				fmt.Printf("Rejecting invalid stream id: %s\n", err)
@@ -174,80 +175,81 @@ func (t *Transport) ReceiveStream() (stream *Stream, e error) {
 	return nil, fmt.Errorf("unexpectedly reached end of read loop")
 }
 
-func (t *Transport) newStream(fd, metaFd int) *Stream {
+func (t *Transport) New(parent *Stream) *Stream {
 	return &Stream{
-		fd: fd,
-		data: os.NewFile(uintptr(fd), fmt.Sprintf("%d", fd)),
-		metaFd: metaFd,
+		parent: parent,
 		transport: t,
 	}
 }
 
-func (t *Transport) SendStream(parent *Stream) (stream *Stream, err error) {
-	defer func() {
-		// fmt.Printf("sent stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), err)
-	}()
-	// Our transport must guarantee both 1) ordered delivery of octet streams
-	// and 2) protected message boundaries.
-	// We have the following options:
-	//
-	// Option 1: use SOCK_SEQPACKET which offers both guarantees natively.
-	// This is the best option, but is not available on all systems.
-	//
-	// Option 2: use SOCK_DGRAM which guarantees message boundaries but not ordered
-	// delivery. In practice most implementations don't re-order datagrams, so with
-	// some fact-checking it might be ok to use this on modern systems.
-	//
-	// Option 3: use SOCK_STREAM which guarantees ordered delivery but not message
-	// boundaries. This requires layering a custom framing protocol over the socket.
-	// This will be required anyway for TCP-based transports.
-	//
-	// See unix(7) and unixpair(2)
-	pair, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		return nil, fmt.Errorf("socketpair: %s", err)
+func (s *Stream) Send() error {
+	if s.id != 0 {
+		return fmt.Errorf("stream already registered as id=%d", s.id)
 	}
-	// We send one fd (arbitrarily: 0) and keep the other (1).
-	defer func() {
-		// Always close the remote fd.
-		syscall.Close(pair[0])
-		// Only close the local fd if there's an error.
+	// If no file has been set with SetFile, setup a socketpair.
+	if s.remote == nil {
+		local, remote, err := Socketpair()
 		if err != nil {
-			syscall.Close(pair[1])
+			return fmt.Errorf("socketpair: %s", err)
 		}
-	}()
-	s := t.newStream(pair[1], -1)
-	s.parent = parent
-	// Register the new stream, setting id to 0 to auto-assign
-	if err := t.Set(0, s, false); err != nil {
-		return nil, err
+		s.SetFile(remote)
+		s.local = local
 	}
-	// Generate info message
+	// Register the new stream, setting id to 0 to auto-assign
+	if err := s.transport.Set(0, s, false); err != nil {
+		return err
+	}
+	if err := Send(s.transport.conn, s.infoMsg().Bytes(), []int{int(s.remote.Fd())}); err != nil {
+		return fmt.Errorf("send: %s", err)
+	}
+	s.remote.Close()
+	return nil
+}
+
+func (s *Stream) infoMsg() data.Msg {
 	info := make(data.Msg)
 	info.SetInt("id", int64(s.id))
 	if p := s.Parent(); p != nil {
 		info.SetInt("parent-id", int64(p.Id()))
 	}
-	if err := Send(t.conn, info.Bytes(), []int{pair[0]}); err != nil {
-		return nil, err
-	}
-	return s, nil
+	return info
 }
 
-func (s *Stream) Hijack() (fd int, err error) {
-	return s.fd, nil
+func (s *Stream) SetFile(f *os.File) {
+	s.remote = f
+	s.local = nil
+}
+
+func (s *Stream) GetFile() (f *os.File, err error) {
+	if s.local != nil {
+		return f, nil
+	}
+	return nil, fmt.Errorf("local endpoint not available")
 }
 
 func (s *Stream) Read(d []byte) (int, error) {
-	return s.data.Read(d)
+	if s.local == nil {
+		return 0, fmt.Errorf("read: local endpoint not available")
+	}
+	return s.local.Read(d)
 }
 
 func (s *Stream) Write(d []byte) (int, error) {
-	return s.data.Write(d)
+	if s.local == nil {
+		return 0, fmt.Errorf("write: local endpoint not available")
+	}
+	return s.local.Write(d)
+}
+
+func (s *Stream) Printf(format string, args ...interface{}) (int, error) {
+	return fmt.Fprintf(s, format, args...)
 }
 
 func (s *Stream) Close() error {
-	return syscall.Close(s.fd)
+	if s.local == nil {
+		return fmt.Errorf("close: local endpoint not available")
+	}
+	return s.local.Close()
 }
 
 func (s *Stream) Metadata() data.StructuredStream {

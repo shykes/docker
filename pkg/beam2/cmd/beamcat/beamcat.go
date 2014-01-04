@@ -43,22 +43,22 @@ func handleUserInput(src io.Reader, t *unix.Transport) {
 		if err := input.Err(); err != nil {
 			log.Fatal("stdin: %s", err)
 		}
-		st, err := t.SendStream(nil)
-		if err != nil {
-			log.Fatalf("sendstream: %s", err)
+		job := t.New(nil)
+		if err := job.Send(); err != nil {
+			log.Fatalf("send: %s", err)
 		}
-		if _, err := fmt.Fprintf(st, "%s\n", input.Text()); err != nil {
+		if _, err := job.Printf("%s\n", input.Text()); err != nil {
 			log.Fatalf("write: %s", err)
 		}
 		wg.Add(1)
-		go func() {
-			err := copyLines(os.Stdout, st, fmt.Sprintf("[%d] ", st.Id()))
+		go func(cmdline string) {
+			err := copyLines(os.Stdout, job, fmt.Sprintf("[%d] [%s] ", job.Id(), cmdline))
 			if err != nil {
 				log.Printf("Error reading from stream: %s", err)
 			}
-			fmt.Printf("[%d] Closed\n", st.Id())
+			fmt.Printf("[%d] [%s] Closed\n", job.Id(), cmdline)
 			wg.Done()
-		}()
+		}(input.Text())
 	}
 }
 
@@ -82,15 +82,16 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for {
-		st, err := t.ReceiveStream()
+		st, err := t.Receive()
 		if err != nil {
-			log.Fatalf("receivestream: %s", err)
+			log.Fatalf("receive: %s", err)
 		}
 		if st.Parent() != nil {
-			go copyLines(os.Stdout, st, fmt.Sprintf("[%d] ", st.Id()))
+			go copyLines(os.Stdout, st, fmt.Sprintf("[%d/%d] ", st.Parent().Id(), st.Id()))
 			continue
 		}
-		scanner := bufio.NewScanner(st)
+		job := st
+		scanner := bufio.NewScanner(job)
 		scanner.Scan()
 		if err := scanner.Err(); err != nil {
 			log.Fatal("read from peer: %s", err)
@@ -99,27 +100,28 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 		wg.Add(1)
 		go func() {
 			words := strings.Split(scanner.Text(), " ")
-			stdout, err := t.SendStream(st)
-			if err != nil {
-				return
+			stdout := t.New(job)
+			if err := stdout.Send(); err != nil {
+				log.Fatalf("send stdout: %s", err)
 			}
-			stderr, err := t.SendStream(st)
-			if err != nil {
-				return
+			stderr := t.New(job)
+			if err := stderr.Send(); err != nil {
+				log.Fatalf("send stderr: %s", err)
 			}
 			if words[0] == "download" {
 				if len(words) < 2 {
-					fmt.Fprintf(stderr, "Error: please specify a url\n")
-					fmt.Fprintf(st, "status=1\n")
+					stderr.Printf("Error: please specify a url\n")
+					job.Printf("status=1\n")
 				} else {
-					fmt.Fprintf(stderr, "Downloading from %s\n", words[1])
+					stderr.Printf("Downloading from %s\n", words[1])
 					resp, err := http.Get(words[1])
 					if err != nil {
-						fmt.Fprintf(stderr, "get: %s\n", err)
-						fmt.Fprintf(st, "status=2\n")
+						stderr.Printf("get: %s\n", err)
+						job.Printf("status=2\n")
 					} else {
 						fmt.Fprintf(stderr, "%s\n", resp.Status)
 						io.Copy(stdout, resp.Body)
+						job.Printf("status=0\n")
 					}
 				}
 			} else {
@@ -127,9 +129,11 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 				cmd.Stdout = stdout
 				cmd.Stderr = stderr
 				if err := cmd.Run(); err != nil {
-					fmt.Fprintf(st, "error: %s\n", err)
+					stderr.Printf("error: %s\n", err)
+					job.Printf("status=127\n")
+				} else {
+					fmt.Fprintf(st, "status=%s\n", cmd.ProcessState)
 				}
-				fmt.Fprintf(st, "status=%s\n", cmd.ProcessState)
 			}
 			st.Close()
 			stdout.Close()
