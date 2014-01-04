@@ -126,11 +126,9 @@ func (t *Transport) Receive() (stream *Stream, e error) {
 				fmt.Printf("Skipping invalid stream information (%d bytes)\n", len(buf))
 				continue
 			}
-			fmt.Printf("stream info = %v\n", info)
 			// FInd and validate the parent stream, if specified.
 			var parent *Stream
 			if info.Exists("parent-id") {
-				fmt.Printf("parent-id exists, parsing\n")
 				if parentId64, err := info.GetInt("parent-id"); err != nil {
 					fmt.Printf("Rejecting invalid stream parent-id: %s\n", err)
 					continue
