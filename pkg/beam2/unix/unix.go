@@ -204,6 +204,10 @@ func (s *Stream) Send() error {
 	return nil
 }
 
+func (s *Stream) New() *Stream {
+	return s.transport.New(s)
+}
+
 func (s *Stream) infoMsg() data.Msg {
 	info := make(data.Msg)
 	info.SetInt("id", int64(s.id))
