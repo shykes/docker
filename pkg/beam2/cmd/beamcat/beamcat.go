@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 	"strings"
 	"net/http"
 	"log"
@@ -123,6 +124,8 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 					job.Printf("status=2\n")
 				}
 			}
+			// FIXME: WHY DOES Stream.local.Sync() not fix the race condition arggghhh
+			time.Sleep(42 * time.Millisecond)
 			job.Stdout.Close()
 			job.Stderr.Close()
 			job.Close()
