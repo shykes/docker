@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"syscall"
 	"github.com/dotcloud/docker/pkg/beam2/data"
@@ -20,7 +19,7 @@ type Transport struct {
 type Stream struct {
 	id uint32
 	parent *Stream
-	header http.Header
+	Metadata data.Msg
 	local *os.File
 	remote *os.File
 	metaLocal *os.File
@@ -140,14 +139,14 @@ func (t *Transport) Receive() (stream *Stream, e error) {
 					}
 				}
 			}
+			s := t.New(parent)
 			// Extract an initial header, if any.
-			var header http.Header
 			if info.Exists("header") {
-				if headerData, err := info.GetMsg("heder"); err != nil {
+				if metadata, err := info.GetMsg("header"); err != nil {
 					fmt.Printf("Rejecting stream with invalid header (%d bytes)\n", len(info.Get("header")))
 					continue
 				} else {
-					header = headerData.ToHTTPHeader()
+					s.Metadata = metadata
 				}
 			}
 			// Validate the stream id.
@@ -158,11 +157,9 @@ func (t *Transport) Receive() (stream *Stream, e error) {
 			} else {
 				id = uint32(id64)
 			}
-			s := t.New(parent)
 			s.id = id
 			s.local = os.NewFile(uintptr(fd), fmt.Sprintf("%d", fd))
 			s.metaLocal = os.NewFile(uintptr(metaFd), fmt.Sprintf("%d", fd))
-			s.header = header
 			if err := t.Set(id, s, true); err != nil {
 				fmt.Printf("Rejecting invalid stream id: %s\n", err)
 				continue
@@ -177,6 +174,7 @@ func (t *Transport) New(parent *Stream) *Stream {
 	return &Stream{
 		parent: parent,
 		transport: t,
+		Metadata: make(data.Msg),
 	}
 }
 
@@ -213,6 +211,10 @@ func (s *Stream) infoMsg() data.Msg {
 	info.SetInt("id", int64(s.id))
 	if p := s.Parent(); p != nil {
 		info.SetInt("parent-id", int64(p.Id()))
+	}
+	// Send initial metadata, if any, as a nested "header" field
+	if len(s.Metadata) > 0 {
+		info.Set("header", s.Metadata.String())
 	}
 	return info
 }
@@ -253,11 +255,6 @@ func (s *Stream) Close() error {
 	}
 	s.local.Sync()
 	return s.local.Close()
-}
-
-func (s *Stream) Metadata() data.StructuredStream {
-	// FIXME
-	return nil
 }
 
 func (s *Stream) Id() int {

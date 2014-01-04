@@ -88,6 +88,7 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 		if err != nil {
 			log.Fatalf("receive: %s", err)
 		}
+		fmt.Printf("+++ %d %s\n", st.Id(), st.Metadata.ShortString())
 		if st.Parent() != nil {
 			go func() {
 				prefix := fmt.Sprintf("[%d/%d] ", st.Parent().Id(), st.Id())
@@ -114,10 +115,12 @@ func handleRequests(t *unix.Transport, dst io.Writer) {
 			job.Printf("job-name=%s\n", job.Name)
 			job.Printf("job-args=%s\n", strings.Join(job.Args, "\x00"))
 			job.Stdout = job.New()
+			job.Stdout.Metadata.Set("name", "stdout")
 			if err := job.Stdout.Send(); err != nil {
 				log.Fatalf("send stdout: %s", err)
 			}
 			job.Stderr = job.New()
+			job.Stderr.Metadata.Set("name", "stderr")
 			if err := job.Stderr.Send(); err != nil {
 				log.Fatalf("send stderr: %s", err)
 			}
