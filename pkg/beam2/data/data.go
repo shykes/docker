@@ -39,6 +39,23 @@ func (m Msg) String() string {
 	return string(m.Bytes())
 }
 
+func (m Msg) ShortString() string {
+	parts := make([]string, 0, len(m))
+	for k, values := range m {
+		shortVals := make([]string, 0, len(values))
+		for _, v := range values {
+			lines := strings.SplitN(v, "\n", 2)
+			shortVal := lines[0]
+			if len(lines) > 1 {
+				shortVal = shortVal + "..."
+			}
+			shortVals = append(shortVals, shortVal)
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", k, strings.Join(shortVals, ",")))
+	}
+	return strings.Join(parts, " ")
+}
+
 func (m Msg) Bytes() []byte {
 	var buf bytes.Buffer
 	m.WriteTo(&buf)
