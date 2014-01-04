@@ -83,8 +83,9 @@ func (m Msg) Del(k string) {
 
 func (m Msg) WriteTo(dst io.Writer) (written int64, err error) {
 	var n int
+	var nKey int
 	for key, values := range m {
-		for _, value := range values {
+		for nValue, value := range values {
 			if strings.ContainsRune(value, '\n') {
 				// This snippet is adapted from the go-systemd package,
 				// credits to the go-systemd authors:
@@ -105,19 +106,24 @@ func (m Msg) WriteTo(dst io.Writer) (written int64, err error) {
 				if err != nil {
 					return
 				}
-				n, err = fmt.Fprintln(dst, value)
+				n, err = fmt.Fprintf(dst, "%s", value)
 				written += int64(n)
 				if err != nil {
 					return
 				}
 			} else {
-				n, err = fmt.Fprintf(dst, "%s=%s\n", key, value)
+				n, err = fmt.Fprintf(dst, "%s=%s", key, value)
 				written += int64(n)
 				if err != nil {
 					return
 				}
 			}
+			if nKey != len(m) || nValue != len(values) {
+				fmt.Fprintf(dst, "\n")
+				written += 1
+			}
 		}
+		nKey++
 	}
 	return
 }
