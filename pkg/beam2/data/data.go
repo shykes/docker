@@ -20,16 +20,16 @@ type StructuredStream interface {
 type Msg map[string][]string
 
 func (m Msg) Add(k, v string) {
-	values, exists := m[k]
+	values, exists := m[m.transformKey(k)]
 	if !exists {
-		m[k] = []string{v}
+		m.Set(k, v)
 	} else {
-		m[k] = append(values, v)
+		m[m.transformKey(k)] = append(values, v)
 	}
 }
 
 func (m Msg) Get(k string) string {
-	if values, exists := m[k]; exists && len(values) >= 1 {
+	if values, exists := m[m.transformKey(k)]; exists && len(values) >= 1 {
 		return values[0]
 	}
 	return ""
@@ -47,17 +47,21 @@ func (m Msg) Bytes() []byte {
 }
 
 func (m Msg) Exists(k string) bool {
-	_, exists := m[k]
+	_, exists := m[m.transformKey(k)]
 	return exists
 }
 
 
 func (m Msg) Set(k, v string) {
-	m[k] = []string{v}
+	m[m.transformKey(k)] = []string{v}
+}
+
+func (m Msg) transformKey(k string) string {
+	return strings.ToLower(k)
 }
 
 func (m Msg) Del(k string) {
-	delete(m, k)
+	delete(m, m.transformKey(k))
 }
 
 func (m Msg) WriteTo(dst io.Writer) (written int64, err error) {
