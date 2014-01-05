@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"syscall"
 	"github.com/dotcloud/docker/pkg/beam2/data"
 )
 
 type Transport struct {
-	conn *net.UnixConn
+	conn *Conn
 	idsIn *IdCounter
 	idsOut *IdCounter
 	streams map[uint32]*Stream
@@ -29,26 +28,11 @@ type Stream struct {
 
 func New(conn *net.UnixConn, server bool) *Transport {
 	return &Transport{
-		conn: conn,
+		conn: &Conn{conn},
 		idsOut: &IdCounter{ odd: !server},
 		idsIn:  &IdCounter{ odd: server},
 		streams: make(map[uint32]*Stream),
 	}
-}
-
-func extractFds(oob []byte) (fds []int) {
-	scms, err := syscall.ParseSocketControlMessage(oob)
-	if err != nil {
-		return
-	}
-	for _, scm := range scms {
-		gotFds, err := syscall.ParseUnixRights(&scm)
-		if err != nil {
-			continue
-		}
-		fds = append(fds, gotFds...)
-	}
-	return
 }
 
 func (t *Transport) Close() error {
@@ -81,29 +65,12 @@ func (t *Transport) Get(id uint32) *Stream {
 	return nil
 }
 
-func Receive(conn *net.UnixConn) (data []byte, fds []int, err error) {
-	buf := make([]byte, 4096)
-	oob := make([]byte, 4096)
-	bufn, oobn, _, _, err := conn.ReadMsgUnix(buf, oob)
-	if err != nil {
-		return nil, nil, fmt.Errorf("readmsg: %s", err)
-	}
-	fds = extractFds(oob[:oobn])
-	data = buf[:bufn]
-	return
-}
-
-func Send(conn *net.UnixConn, data []byte, fds[]int) (err error) {
-	_, _, err = conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
-	return err
-}
-
 func (t *Transport) Receive() (stream *Stream, e error) {
 	defer func() {
 		// fmt.Printf("received stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), e)
 	}()
 	for {
-		buf, fds, err := Receive(t.conn)
+		buf, fds, err := t.conn.Receive()
 		if err != nil {
 			return nil, fmt.Errorf("receive: %s", err)
 		}
@@ -195,7 +162,7 @@ func (s *Stream) Send() error {
 	if err := s.transport.Set(0, s, false); err != nil {
 		return err
 	}
-	if err := Send(s.transport.conn, s.infoMsg().Bytes(), []int{int(s.remote.Fd())}); err != nil {
+	if err := s.transport.conn.Send(s.infoMsg().Bytes(), []int{int(s.remote.Fd())}); err != nil {
 		return fmt.Errorf("send: %s", err)
 	}
 	s.remote.Close()
