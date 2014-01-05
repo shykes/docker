@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"io"
+	"bufio"
 	"github.com/dotcloud/docker/pkg/beam2/data"
 )
 
@@ -145,7 +147,7 @@ func (session *Session) New(parent *Stream) *Stream {
 	}
 }
 
-func (s *Stream) Send() error {
+func (s *Stream) Send(presend ...func(id int)) error {
 	if s.id != 0 {
 		return fmt.Errorf("stream already registered as id=%d", s.id)
 	}
@@ -162,6 +164,11 @@ func (s *Stream) Send() error {
 	if err := s.session.Set(0, s, false); err != nil {
 		return err
 	}
+	// Now we have the final ID
+	for _, fn := range presend {
+		fn(s.Id())
+	}
+	// FIXME: serialize sending to avoid race conditions in ID numbering
 	if err := s.session.conn.Send(s.infoMsg().Bytes(), []int{int(s.remote.Fd())}); err != nil {
 		return fmt.Errorf("send: %s", err)
 	}
@@ -214,6 +221,21 @@ func (s *Stream) Write(d []byte) (int, error) {
 
 func (s *Stream) Printf(format string, args ...interface{}) (int, error) {
 	return fmt.Fprintf(s, format, args...)
+}
+
+func (s *Stream) TailTo(dst io.Writer, prefix string) error {
+	scanner := bufio.NewScanner(s)
+	for scanner.Scan() {
+		if line := scanner.Text(); line != "" {
+			if _, err := fmt.Fprintf(dst, "%s%s\n", prefix, line); err != nil {
+				return err
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Stream) Close() error {

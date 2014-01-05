@@ -22,20 +22,70 @@ func main() {
 	}
 	session := unix.New(sock, server)
 	defer session.Close()
+	srv := NewServer(session)
+	newJobs := srv.NewRoute()
+	newJobs.Parent()
+	newJobs.Headers("content-type", "beam-job")
+	newJobs.HandleFunc(handleNewJob)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
-		handleUserInput(os.Stdin, session)
+		handleUserInput(os.Stdin, srv)
 		wg.Done()
 	}()
 	go func() {
-		handleRequests(session, os.Stdout)
+		if err := srv.Serve(); err != nil {
+			fmt.Fprintf(os.Stderr, "serve: %s\n", err)
+		}
 		wg.Done()
 	}()
 	wg.Wait()
 }
 
-func handleUserInput(src io.Reader, t *unix.Session) {
+func handleNewJob(st *unix.Stream) {
+	fmt.Printf("---> New job\n")
+	scanner := bufio.NewScanner(st)
+	scanner.Scan()
+	if err := scanner.Err(); err != nil {
+		log.Fatal("read from peer: %s", err)
+	}
+	fmt.Printf("---> %s\n", scanner.Text())
+	words := strings.Split(strings.Trim(scanner.Text(), " \t"), " ")
+	job := &Job{
+		Stream: st,
+		Name: words[0],
+		Args: words[1:],
+	}
+	job.Printf("job-name=%s\n", job.Name)
+	job.Printf("job-args=%s\n", strings.Join(job.Args, "\x00"))
+	job.Stdout = job.New()
+	job.Stdout.Metadata.Set("name", "stdout")
+	if err := job.Stdout.Send(); err != nil {
+		log.Fatalf("send stdout: %s", err)
+	}
+	job.Stderr = job.New()
+	job.Stderr.Metadata.Set("name", "stderr")
+	if err := job.Stderr.Send(); err != nil {
+		log.Fatalf("send stderr: %s", err)
+	}
+	switch job.Name {
+		case "download": jobDownload(job)
+		case "listen":   jobListen(job)
+		case "exec":     jobExec(job)
+		default: {
+			job.Stderr.Printf("No such command: %s\n", job.Name)
+			job.Printf("status=2\n")
+		}
+	}
+	// FIXME: WHY DOES Stream.local.Sync() not fix the race condition arggghhh
+	time.Sleep(42 * time.Millisecond)
+	job.Stdout.Close()
+	job.Stderr.Close()
+	job.Close()
+}
+
+
+func handleUserInput(src io.Reader, srv *Server) {
 	defer fmt.Printf("handleUserInput done\n")
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -44,16 +94,28 @@ func handleUserInput(src io.Reader, t *unix.Session) {
 		if err := input.Err(); err != nil {
 			log.Fatal("stdin: %s", err)
 		}
-		job := t.New(nil)
-		if err := job.Send(); err != nil {
-			log.Fatalf("send: %s", err)
+		job := srv.Session().New(nil)
+		job.Metadata.Set("content-type", "beam-job")
+		{
+			cmdline := input.Text()
+			err := job.Send(func(id int) {
+				srv.NewRoute().Parent(id).Headers("name", "stdout").HandleFunc(func(st *unix.Stream) {
+					st.TailTo(os.Stdout, fmt.Sprintf("[%d/stdout] [%s] ", job.Id(), cmdline))
+				})
+				srv.NewRoute().Parent(id).Headers("name", "stderr").HandleFunc(func(st *unix.Stream) {
+					st.TailTo(os.Stderr, fmt.Sprintf("[%d/stderr] [%s] " , job.Id(), cmdline))
+				})
+			})
+			if err != nil {
+				log.Fatalf("send: %s", err)
+			}
 		}
 		if _, err := job.Printf("%s\n", input.Text()); err != nil {
 			log.Fatalf("write: %s", err)
 		}
 		wg.Add(1)
 		go func(cmdline string) {
-			err := copyLines(os.Stdout, job, fmt.Sprintf("[%d] [%s] ", job.Id(), cmdline))
+			err := job.TailTo(os.Stdout, fmt.Sprintf("[%d] [%s] ", job.Id(), cmdline))
 			if err != nil {
 				log.Printf("Error reading from stream: %s", err)
 			}
@@ -64,81 +126,117 @@ func handleUserInput(src io.Reader, t *unix.Session) {
 	}
 }
 
-func copyLines(dst io.Writer, src io.Reader, prefix string) error {
-	scanner := bufio.NewScanner(src)
-	for scanner.Scan() {
-		if line := scanner.Text(); line != "" {
-			if _, err := fmt.Fprintf(dst, "%s%s\n", prefix, line); err != nil {
-				return err
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			return err
-		}
-	}
-	return nil
+// Server
+
+type Server struct {
+	session *unix.Session
+	routes []*Route
 }
 
-func handleRequests(t *unix.Session, dst io.Writer) {
-	defer fmt.Printf("handleRequests done\n")
+func (srv *Server) Session() *unix.Session {
+	return srv.session
+}
+
+func NewServer(session *unix.Session) *Server {
+	return &Server{session: session}
+}
+
+func (srv *Server) NewRoute() *Route {
+	route := &Route{}
+	srv.routes = append(srv.routes, route)
+	return route
+}
+
+type Route struct {
+	filters []func(*unix.Stream) bool
+	fn func(*unix.Stream)
+}
+
+func (r *Route) Parent(parentIds ...int) *Route {
+	r.filters = append(r.filters, func(st *unix.Stream) bool {
+		parent := st.Parent()
+		if parent == nil  {
+			fmt.Printf("Matching stream %d (no parent) against possible parents %v\n", st.Id(), parentIds)
+			return len(parentIds) == 0
+		}
+		fmt.Printf("Matching stream %d (parent %d) against possible parents %v\n", st.Id(), parent.Id(), parentIds)
+		for _, parentId := range parentIds {
+			if parent.Id() == parentId {
+				return true
+			}
+		}
+		return false
+	})
+	return r
+}
+
+func (r *Route) Headers(pairs ...string) *Route {
+	r.filters = append(r.filters, func(st *unix.Stream) (match bool) {
+		for i:=0; i < len(pairs); i+=2 {
+			key := pairs[i]
+			var value string
+			if len(pairs) > i + 1 {
+				value = pairs[i + 1]
+			}
+			if value == "" {
+				if !st.Metadata.Exists(key) {
+					return false
+				}
+				continue
+			}
+			if st.Metadata.Get(key) != value {
+				return false
+			}
+		}
+		return true
+	})
+	return r
+}
+
+func (r *Route) HandleFunc(fn func(*unix.Stream)) *Route {
+	r.fn = fn
+	return r
+}
+
+func (r *Route) Match(st *unix.Stream) (match bool) {
+	for _, filter := range r.filters {
+		if filter(st) == false {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *Route) Handle(st *unix.Stream) {
+	if r.fn == nil {
+		return
+	}
+	r.fn(st)
+}
+
+func (srv *Server) Serve() error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for {
-		st, err := t.Receive()
+		st, err := srv.session.Receive()
 		if err != nil {
-			log.Fatalf("receive: %s", err)
+			return fmt.Errorf("receive: %s", err)
 		}
 		fmt.Printf("+++ %d %s\n", st.Id(), st.Metadata.ShortString())
-		if st.Parent() != nil {
-			go func() {
-				prefix := fmt.Sprintf("[%d/%d] ", st.Parent().Id(), st.Id())
-				copyLines(os.Stdout, st, prefix)
-				fmt.Printf("%sClosed\n", prefix)
-				st.Close()
-			}()
-			continue
+		for i := range srv.routes {
+			// Last route added wins
+			route := srv.routes[len(srv.routes) - i - 1]
+			if route.Match(st) {
+				wg.Add(1)
+				go func() {
+					route.Handle(st)
+					st.Close()
+					wg.Done()
+				}()
+				continue
+			}
 		}
-		scanner := bufio.NewScanner(st)
-		scanner.Scan()
-		if err := scanner.Err(); err != nil {
-			log.Fatal("read from peer: %s", err)
-		}
-		fmt.Printf("---> %s\n", scanner.Text())
-		wg.Add(1)
-		go func() {
-			words := strings.Split(strings.Trim(scanner.Text(), " \t"), " ")
-			job := &Job{
-				Stream: st,
-				Name: words[0],
-				Args: words[1:],
-			}
-			job.Printf("job-name=%s\n", job.Name)
-			job.Printf("job-args=%s\n", strings.Join(job.Args, "\x00"))
-			job.Stdout = job.New()
-			job.Stdout.Metadata.Set("name", "stdout")
-			if err := job.Stdout.Send(); err != nil {
-				log.Fatalf("send stdout: %s", err)
-			}
-			job.Stderr = job.New()
-			job.Stderr.Metadata.Set("name", "stderr")
-			if err := job.Stderr.Send(); err != nil {
-				log.Fatalf("send stderr: %s", err)
-			}
-			switch job.Name {
-				case "download": jobDownload(job)
-				case "listen":   jobListen(job)
-				case "exec":     jobExec(job)
-				default: {
-					job.Stderr.Printf("No such command: %s\n", job.Name)
-					job.Printf("status=2\n")
-				}
-			}
-			// FIXME: WHY DOES Stream.local.Sync() not fix the race condition arggghhh
-			time.Sleep(42 * time.Millisecond)
-			job.Stdout.Close()
-			job.Stderr.Close()
-			job.Close()
-		}()
+		fmt.Printf("No matching route for inbound stream %d. Dropping\n", st.Id())
 	}
 }
 
