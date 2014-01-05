@@ -20,22 +20,22 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	transport := unix.New(sock, server)
-	defer transport.Close()
+	session := unix.New(sock, server)
+	defer session.Close()
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
-		handleUserInput(os.Stdin, transport)
+		handleUserInput(os.Stdin, session)
 		wg.Done()
 	}()
 	go func() {
-		handleRequests(transport, os.Stdout)
+		handleRequests(session, os.Stdout)
 		wg.Done()
 	}()
 	wg.Wait()
 }
 
-func handleUserInput(src io.Reader, t *unix.Transport) {
+func handleUserInput(src io.Reader, t *unix.Session) {
 	defer fmt.Printf("handleUserInput done\n")
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -79,7 +79,7 @@ func copyLines(dst io.Writer, src io.Reader, prefix string) error {
 	return nil
 }
 
-func handleRequests(t *unix.Transport, dst io.Writer) {
+func handleRequests(t *unix.Session, dst io.Writer) {
 	defer fmt.Printf("handleRequests done\n")
 	var wg sync.WaitGroup
 	defer wg.Wait()

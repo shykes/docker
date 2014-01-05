@@ -8,7 +8,7 @@ import (
 	"github.com/dotcloud/docker/pkg/beam2/data"
 )
 
-type Transport struct {
+type Session struct {
 	conn *Conn
 	idsIn *IdCounter
 	idsOut *IdCounter
@@ -23,11 +23,11 @@ type Stream struct {
 	remote *os.File
 	metaLocal *os.File
 	metaRemote *os.File
-	transport *Transport
+	session *Session
 }
 
-func New(conn *net.UnixConn, server bool) *Transport {
-	return &Transport{
+func New(conn *net.UnixConn, server bool) *Session {
+	return &Session{
 		conn: &Conn{conn},
 		idsOut: &IdCounter{ odd: !server},
 		idsIn:  &IdCounter{ odd: server},
@@ -35,42 +35,42 @@ func New(conn *net.UnixConn, server bool) *Transport {
 	}
 }
 
-func (t *Transport) Close() error {
-	return t.conn.Close()
+func (session *Session) Close() error {
+	return session.conn.Close()
 }
 
-func (t *Transport) Set(id uint32, stream *Stream, inbound bool) error {
+func (session *Session) Set(id uint32, stream *Stream, inbound bool) error {
 	var ids *IdCounter
 	if inbound {
-		ids = t.idsIn
+		ids = session.idsIn
 	} else {
-		ids = t.idsOut
+		ids = session.idsOut
 	}
 	actualId, err := ids.Register(id)
 	if err != nil {
 		return err
 	}
-	if _, exists := t.streams[actualId]; exists {
+	if _, exists := session.streams[actualId]; exists {
 		return fmt.Errorf("stream already exists: %d", id)
 	}
 	stream.id = actualId
-	t.streams[actualId] = stream
+	session.streams[actualId] = stream
 	return nil
 }
 
-func (t *Transport) Get(id uint32) *Stream {
-	if s, exists := t.streams[id]; exists {
+func (session *Session) Get(id uint32) *Stream {
+	if s, exists := session.streams[id]; exists {
 		return s
 	}
 	return nil
 }
 
-func (t *Transport) Receive() (stream *Stream, e error) {
+func (session *Session) Receive() (stream *Stream, e error) {
 	defer func() {
 		// fmt.Printf("received stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), e)
 	}()
 	for {
-		buf, fds, err := t.conn.Receive()
+		buf, fds, err := session.conn.Receive()
 		if err != nil {
 			return nil, fmt.Errorf("receive: %s", err)
 		}
@@ -99,14 +99,14 @@ func (t *Transport) Receive() (stream *Stream, e error) {
 					fmt.Printf("Rejecting invalid stream parent-id: %s\n", err)
 					continue
 				} else {
-					parent = t.Get(uint32(parentId64))
+					parent = session.Get(uint32(parentId64))
 					if parent == nil {
 						fmt.Printf("Rejecting stream with non-existent parent-id %d\n", parentId64)
 						continue
 					}
 				}
 			}
-			s := t.New(parent)
+			s := session.New(parent)
 			// Extract an initial header, if any.
 			if info.Exists("header") {
 				if metadata, err := info.GetMsg("header"); err != nil {
@@ -127,7 +127,7 @@ func (t *Transport) Receive() (stream *Stream, e error) {
 			s.id = id
 			s.local = os.NewFile(uintptr(fd), fmt.Sprintf("%d", fd))
 			s.metaLocal = os.NewFile(uintptr(metaFd), fmt.Sprintf("%d", fd))
-			if err := t.Set(id, s, true); err != nil {
+			if err := session.Set(id, s, true); err != nil {
 				fmt.Printf("Rejecting invalid stream id: %s\n", err)
 				continue
 			}
@@ -137,10 +137,10 @@ func (t *Transport) Receive() (stream *Stream, e error) {
 	return nil, fmt.Errorf("unexpectedly reached end of read loop")
 }
 
-func (t *Transport) New(parent *Stream) *Stream {
+func (session *Session) New(parent *Stream) *Stream {
 	return &Stream{
 		parent: parent,
-		transport: t,
+		session: session,
 		Metadata: make(data.Msg),
 	}
 }
@@ -159,10 +159,10 @@ func (s *Stream) Send() error {
 		s.local = local
 	}
 	// Register the new stream, setting id to 0 to auto-assign
-	if err := s.transport.Set(0, s, false); err != nil {
+	if err := s.session.Set(0, s, false); err != nil {
 		return err
 	}
-	if err := s.transport.conn.Send(s.infoMsg().Bytes(), []int{int(s.remote.Fd())}); err != nil {
+	if err := s.session.conn.Send(s.infoMsg().Bytes(), []int{int(s.remote.Fd())}); err != nil {
 		return fmt.Errorf("send: %s", err)
 	}
 	s.remote.Close()
@@ -170,7 +170,7 @@ func (s *Stream) Send() error {
 }
 
 func (s *Stream) New() *Stream {
-	return s.transport.New(s)
+	return s.session.New(s)
 }
 
 func (s *Stream) infoMsg() data.Msg {
