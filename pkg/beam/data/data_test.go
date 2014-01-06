@@ -1,8 +1,8 @@
 package data
 
 import (
-	"testing"
 	"strings"
+	"testing"
 )
 
 func TestMsgAddGet(t *testing.T) {

@@ -2,21 +2,21 @@ package beam
 
 import (
 	"bufio"
-	"github.com/dotcloud/docker/pkg/beam/data"
 	"fmt"
+	"github.com/dotcloud/docker/pkg/beam/data"
 	"io"
 	"os"
 )
 
 type Stream struct {
-	id uint32
-	parent *Stream
-	Metadata data.Msg
-	local *os.File
-	remote *os.File
-	metaLocal *os.File
+	id         uint32
+	parent     *Stream
+	Metadata   data.Msg
+	local      *os.File
+	remote     *os.File
+	metaLocal  *os.File
 	metaRemote *os.File
-	session *Session
+	session    *Session
 }
 
 func (s *Stream) Send(presend ...func(id int)) error {

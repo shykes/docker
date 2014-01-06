@@ -3,23 +3,23 @@ package beam
 import (
 	"bytes"
 	"fmt"
+	"github.com/dotcloud/docker/pkg/beam/data"
 	"net"
 	"os"
-	"github.com/dotcloud/docker/pkg/beam/data"
 )
 
 type Session struct {
-	conn *Conn
-	idsIn *IdCounter
-	idsOut *IdCounter
+	conn    *Conn
+	idsIn   *IdCounter
+	idsOut  *IdCounter
 	streams map[uint32]*Stream
 }
 
 func New(conn *net.UnixConn, server bool) *Session {
 	return &Session{
-		conn: &Conn{conn},
-		idsOut: &IdCounter{ odd: !server},
-		idsIn:  &IdCounter{ odd: server},
+		conn:    &Conn{conn},
+		idsOut:  &IdCounter{odd: !server},
+		idsIn:   &IdCounter{odd: server},
 		streams: make(map[uint32]*Stream),
 	}
 }
@@ -128,9 +128,8 @@ func (session *Session) Receive() (stream *Stream, e error) {
 
 func (session *Session) New(parent *Stream) *Stream {
 	return &Stream{
-		parent: parent,
-		session: session,
+		parent:   parent,
+		session:  session,
 		Metadata: make(data.Msg),
 	}
 }
-

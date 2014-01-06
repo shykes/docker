@@ -1,18 +1,18 @@
 package main
 
 import (
-	"io"
-	"os"
 	"bufio"
-	"os/exec"
 	"fmt"
+	"github.com/dotcloud/docker/pkg/beam"
+	"io"
+	"log"
 	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
-	"strings"
-	"net/http"
-	"log"
-	"github.com/dotcloud/docker/pkg/beam"
 )
 
 func main() {
@@ -53,8 +53,8 @@ func handleNewJob(st *beam.Stream) {
 	words := strings.Split(strings.Trim(scanner.Text(), " \t"), " ")
 	job := &Job{
 		Stream: st,
-		Name: words[0],
-		Args: words[1:],
+		Name:   words[0],
+		Args:   words[1:],
 	}
 	job.Printf("job-name=%s\n", job.Name)
 	job.Printf("job-args=%s\n", strings.Join(job.Args, "\x00"))
@@ -69,10 +69,14 @@ func handleNewJob(st *beam.Stream) {
 		log.Fatalf("send stderr: %s", err)
 	}
 	switch job.Name {
-		case "download": jobDownload(job)
-		case "listen":   jobListen(job)
-		case "exec":     jobExec(job)
-		default: {
+	case "download":
+		jobDownload(job)
+	case "listen":
+		jobListen(job)
+	case "exec":
+		jobExec(job)
+	default:
+		{
 			job.Stderr.Printf("No such command: %s\n", job.Name)
 			job.Printf("status=2\n")
 		}
@@ -83,7 +87,6 @@ func handleNewJob(st *beam.Stream) {
 	job.Stderr.Close()
 	job.Close()
 }
-
 
 func handleUserInput(src io.Reader, srv *Server) {
 	defer fmt.Printf("handleUserInput done\n")
@@ -103,7 +106,7 @@ func handleUserInput(src io.Reader, srv *Server) {
 					st.TailTo(os.Stdout, fmt.Sprintf("[%d/stdout] [%s] ", job.Id(), cmdline))
 				})
 				srv.NewRoute().Parent(id).Headers("name", "stderr").HandleFunc(func(st *beam.Stream) {
-					st.TailTo(os.Stderr, fmt.Sprintf("[%d/stderr] [%s] " , job.Id(), cmdline))
+					st.TailTo(os.Stderr, fmt.Sprintf("[%d/stderr] [%s] ", job.Id(), cmdline))
 				})
 			})
 			if err != nil {
@@ -130,7 +133,7 @@ func handleUserInput(src io.Reader, srv *Server) {
 
 type Server struct {
 	session *beam.Session
-	routes []*Route
+	routes  []*Route
 }
 
 func (srv *Server) Session() *beam.Session {
@@ -149,13 +152,13 @@ func (srv *Server) NewRoute() *Route {
 
 type Route struct {
 	filters []func(*beam.Stream) bool
-	fn func(*beam.Stream)
+	fn      func(*beam.Stream)
 }
 
 func (r *Route) Parent(parentIds ...int) *Route {
 	r.filters = append(r.filters, func(st *beam.Stream) (match bool) {
 		parent := st.Parent()
-		if parent == nil  {
+		if parent == nil {
 			return len(parentIds) == 0
 		}
 		for _, parentId := range parentIds {
@@ -170,11 +173,11 @@ func (r *Route) Parent(parentIds ...int) *Route {
 
 func (r *Route) Headers(pairs ...string) *Route {
 	r.filters = append(r.filters, func(st *beam.Stream) (match bool) {
-		for i:=0; i < len(pairs); i+=2 {
+		for i := 0; i < len(pairs); i += 2 {
 			key := pairs[i]
 			var value string
-			if len(pairs) > i + 1 {
-				value = pairs[i + 1]
+			if len(pairs) > i+1 {
+				value = pairs[i+1]
 			}
 			if value == "" {
 				if !st.Metadata.Exists(key) {
@@ -223,7 +226,7 @@ func (srv *Server) Serve() error {
 		fmt.Printf("+++ %d %s\n", st.Id(), st.Metadata.ShortString())
 		for i := range srv.routes {
 			// Last route added wins
-			route := srv.routes[len(srv.routes) - i - 1]
+			route := srv.routes[len(srv.routes)-i-1]
 			if route.Match(st) {
 				wg.Add(1)
 				go func() {
@@ -369,12 +372,11 @@ func jobExec(job *Job) {
 
 type Job struct {
 	*beam.Stream
-	Name string
-	Args []string
+	Name   string
+	Args   []string
 	Stdout *beam.Stream
 	Stderr *beam.Stream
 }
-
 
 func jobDownload(job *Job) {
 	if len(job.Args) < 1 {

@@ -1,10 +1,10 @@
 package main
 
 import (
-	"net"
 	"fmt"
-	"os"
 	"io"
+	"net"
+	"os"
 	"syscall"
 )
 
@@ -49,7 +49,6 @@ func main() {
 	}
 }
 
-
 func connect(filename string) (conn *net.UnixConn, server bool, err error) {
 	addr, err := net.ResolveUnixAddr("unixgram", filename)
 	if err != nil {
@@ -78,7 +77,7 @@ func Receive(conn *net.UnixConn) (data []byte, fds []int, err error) {
 	return
 }
 
-func Send(conn *net.UnixConn, data []byte, fds[]int) error {
+func Send(conn *net.UnixConn, data []byte, fds []int) error {
 	_, _, err := conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
 	return err
 }
@@ -97,4 +96,3 @@ func extractFds(oob []byte) (fds []int) {
 	}
 	return
 }
-

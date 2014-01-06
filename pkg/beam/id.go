@@ -5,7 +5,7 @@ import (
 )
 
 type IdCounter struct {
-	odd bool // Should Ids be even or odd?
+	odd  bool // Should Ids be even or odd?
 	last uint32
 }
 
@@ -29,9 +29,8 @@ func (c *IdCounter) next() (uint32, error) {
 			return 1, nil
 		}
 	}
-        if c.last + 2 > 0xffffffff {
-                return 0, fmt.Errorf("can't allocate new id: uint32 overflow")
-        }
-        return c.last + 2, nil
+	if c.last+2 > 0xffffffff {
+		return 0, fmt.Errorf("can't allocate new id: uint32 overflow")
+	}
+	return c.last + 2, nil
 }
-

@@ -1,16 +1,16 @@
 package beam
 
 import (
+	"fmt"
 	"net"
 	"syscall"
-	"fmt"
 )
 
 type Conn struct {
 	*net.UnixConn
 }
 
-func (conn *Conn) Send(data []byte, fds[]int) (err error) {
+func (conn *Conn) Send(data []byte, fds []int) (err error) {
 	_, _, err = conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
 	return err
 }
@@ -41,4 +41,3 @@ func extractFds(oob []byte) (fds []int) {
 	}
 	return
 }
-

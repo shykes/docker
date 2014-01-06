@@ -2,9 +2,9 @@ package data
 
 import (
 	"fmt"
-	"strconv"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -16,7 +16,6 @@ func (m Msg) GetInt(k string) (int64, error) {
 func (m Msg) SetInt(k string, v int64) {
 	m.Set(k, fmt.Sprintf("%d", v))
 }
-
 
 func (m Msg) GetUint(k string) (uint64, error) {
 	s := strings.Trim(m.Get(k), " \t")

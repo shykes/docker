@@ -1,11 +1,11 @@
 package data
 
 import (
-	"encoding/binary"
-	"io"
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -67,7 +67,6 @@ func (m Msg) Exists(k string) bool {
 	_, exists := m[m.transformKey(k)]
 	return exists
 }
-
 
 func (m Msg) Set(k, v string) {
 	m[m.transformKey(k)] = []string{v}
@@ -139,12 +138,12 @@ func (m Msg) ReadFrom(src io.Reader) (read int64, err error) {
 			if eq == -1 {
 				return 0, fmt.Errorf("invalid format at '%s'...", entry)
 			}
-			m.Add(entry[:eq], entry[eq + 1:])
+			m.Add(entry[:eq], entry[eq+1:])
 		} else {
-			if len(entry) < nl + 1 + 8 {
+			if len(entry) < nl+1+8 {
 				return 0, fmt.Errorf("invalid format at '%s'...: expected %d bytes", entry, len(entry))
 			}
-			m.Add(entry[:nl], entry[nl + 1 + 8:])
+			m.Add(entry[:nl], entry[nl+1+8:])
 		}
 		read += int64(len(entry))
 		err = scanner.Err()
@@ -154,7 +153,6 @@ func (m Msg) ReadFrom(src io.Reader) (read int64, err error) {
 	}
 	return
 }
-
 
 func scanMsg(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	s := string(data)
@@ -175,7 +173,7 @@ func scanMsg(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		return eol + 1, data[:eol], nil
 	}
 	// Parse a binary entry (<key>\n<size><value>\n)
-	if len(s) < eol + 1 + 8 {
+	if len(s) < eol+1+8 {
 		if atEOF {
 			return 0, nil, fmt.Errorf("invalid format: expected size of binary entry '%s', reached EOF", s[:eol])
 		} else {
@@ -184,7 +182,7 @@ func scanMsg(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		}
 	}
 	var sizeUI64 uint64
-	err = binary.Read(strings.NewReader(s[eol + 1:]), binary.LittleEndian, &sizeUI64)
+	err = binary.Read(strings.NewReader(s[eol+1:]), binary.LittleEndian, &sizeUI64)
 	if err != nil {
 		return 0, data[:eol], fmt.Errorf("can't extract length of binary value '%s': %s", s[:eol], err)
 	}
@@ -197,5 +195,5 @@ func scanMsg(data []byte, atEOF bool) (advance int, token []byte, err error) {
 			return 0, nil, nil
 		}
 	}
-	return valueStart + size, data[:valueStart + size], nil
+	return valueStart + size, data[:valueStart+size], nil
 }
