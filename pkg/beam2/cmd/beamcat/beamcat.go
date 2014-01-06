@@ -12,7 +12,7 @@ import (
 	"strings"
 	"net/http"
 	"log"
-	"github.com/dotcloud/docker/pkg/beam2/unix"
+	beam "github.com/dotcloud/docker/pkg/beam2"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	session := unix.New(sock, server)
+	session := beam.New(sock, server)
 	defer session.Close()
 	srv := NewServer(session)
 	newJobs := srv.NewRoute()
@@ -42,7 +42,7 @@ func main() {
 	wg.Wait()
 }
 
-func handleNewJob(st *unix.Stream) {
+func handleNewJob(st *beam.Stream) {
 	fmt.Printf("---> New job\n")
 	scanner := bufio.NewScanner(st)
 	scanner.Scan()
@@ -99,10 +99,10 @@ func handleUserInput(src io.Reader, srv *Server) {
 		{
 			cmdline := input.Text()
 			err := job.Send(func(id int) {
-				srv.NewRoute().Parent(id).Headers("name", "stdout").HandleFunc(func(st *unix.Stream) {
+				srv.NewRoute().Parent(id).Headers("name", "stdout").HandleFunc(func(st *beam.Stream) {
 					st.TailTo(os.Stdout, fmt.Sprintf("[%d/stdout] [%s] ", job.Id(), cmdline))
 				})
-				srv.NewRoute().Parent(id).Headers("name", "stderr").HandleFunc(func(st *unix.Stream) {
+				srv.NewRoute().Parent(id).Headers("name", "stderr").HandleFunc(func(st *beam.Stream) {
 					st.TailTo(os.Stderr, fmt.Sprintf("[%d/stderr] [%s] " , job.Id(), cmdline))
 				})
 			})
@@ -129,15 +129,15 @@ func handleUserInput(src io.Reader, srv *Server) {
 // Server
 
 type Server struct {
-	session *unix.Session
+	session *beam.Session
 	routes []*Route
 }
 
-func (srv *Server) Session() *unix.Session {
+func (srv *Server) Session() *beam.Session {
 	return srv.session
 }
 
-func NewServer(session *unix.Session) *Server {
+func NewServer(session *beam.Session) *Server {
 	return &Server{session: session}
 }
 
@@ -148,18 +148,16 @@ func (srv *Server) NewRoute() *Route {
 }
 
 type Route struct {
-	filters []func(*unix.Stream) bool
-	fn func(*unix.Stream)
+	filters []func(*beam.Stream) bool
+	fn func(*beam.Stream)
 }
 
 func (r *Route) Parent(parentIds ...int) *Route {
-	r.filters = append(r.filters, func(st *unix.Stream) bool {
+	r.filters = append(r.filters, func(st *beam.Stream) (match bool) {
 		parent := st.Parent()
 		if parent == nil  {
-			fmt.Printf("Matching stream %d (no parent) against possible parents %v\n", st.Id(), parentIds)
 			return len(parentIds) == 0
 		}
-		fmt.Printf("Matching stream %d (parent %d) against possible parents %v\n", st.Id(), parent.Id(), parentIds)
 		for _, parentId := range parentIds {
 			if parent.Id() == parentId {
 				return true
@@ -171,7 +169,7 @@ func (r *Route) Parent(parentIds ...int) *Route {
 }
 
 func (r *Route) Headers(pairs ...string) *Route {
-	r.filters = append(r.filters, func(st *unix.Stream) (match bool) {
+	r.filters = append(r.filters, func(st *beam.Stream) (match bool) {
 		for i:=0; i < len(pairs); i+=2 {
 			key := pairs[i]
 			var value string
@@ -193,12 +191,12 @@ func (r *Route) Headers(pairs ...string) *Route {
 	return r
 }
 
-func (r *Route) HandleFunc(fn func(*unix.Stream)) *Route {
+func (r *Route) HandleFunc(fn func(*beam.Stream)) *Route {
 	r.fn = fn
 	return r
 }
 
-func (r *Route) Match(st *unix.Stream) (match bool) {
+func (r *Route) Match(st *beam.Stream) (match bool) {
 	for _, filter := range r.filters {
 		if filter(st) == false {
 			return false
@@ -207,7 +205,7 @@ func (r *Route) Match(st *unix.Stream) (match bool) {
 	return true
 }
 
-func (r *Route) Handle(st *unix.Stream) {
+func (r *Route) Handle(st *beam.Stream) {
 	if r.fn == nil {
 		return
 	}
@@ -370,11 +368,11 @@ func jobExec(job *Job) {
 }
 
 type Job struct {
-	*unix.Stream
+	*beam.Stream
 	Name string
 	Args []string
-	Stdout *unix.Stream
-	Stderr *unix.Stream
+	Stdout *beam.Stream
+	Stderr *beam.Stream
 }
 
 
