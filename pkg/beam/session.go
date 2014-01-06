@@ -4,64 +4,124 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/dotcloud/docker/pkg/beam/data"
+	"io"
 	"net"
 	"os"
+	"sync"
 )
 
 type Session struct {
 	conn    *Conn
-	idsIn   *IdCounter
-	idsOut  *IdCounter
+	connError error
+	chReceive	chan *Stream
+	chSend chan *Stream
 	streams map[uint32]*Stream
+	isServer bool
 }
 
 func New(conn *net.UnixConn, server bool) *Session {
 	return &Session{
 		conn:    &Conn{conn},
-		idsOut:  &IdCounter{odd: !server},
-		idsIn:   &IdCounter{odd: server},
 		streams: make(map[uint32]*Stream),
+		isServer: server,
+		chReceive : make(chan *Stream, 4096),
+		chSend : make(chan *Stream, 4096),
 	}
 }
 
-func (session *Session) Close() error {
-	return session.conn.Close()
-}
-
-func (session *Session) Set(id uint32, stream *Stream, inbound bool) error {
-	var ids *IdCounter
-	if inbound {
-		ids = session.idsIn
-	} else {
-		ids = session.idsOut
-	}
-	actualId, err := ids.Register(id)
-	if err != nil {
-		return err
-	}
-	if _, exists := session.streams[actualId]; exists {
-		return fmt.Errorf("stream already exists: %d", id)
-	}
-	stream.id = actualId
-	session.streams[actualId] = stream
-	return nil
-}
-
-func (session *Session) Get(id uint32) *Stream {
-	if s, exists := session.streams[id]; exists {
-		return s
-	}
-	return nil
-}
-
-func (session *Session) Receive() (stream *Stream, e error) {
-	defer func() {
-		// fmt.Printf("received stream: id=%d parent=%v err=%v\n", stream.Id(), stream.Parent(), e)
+func (session *Session) Run() error {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var firstErr error
+	go func() {
+		err := session.sendLoop()
+		if firstErr == nil && err != nil  {
+			firstErr = err
+		}
+		wg.Done()
 	}()
+	go func() {
+		err := session.receiveLoop()
+		if firstErr == nil && err != nil  {
+			firstErr = err
+		}
+		wg.Done()
+	}()
+	wg.Wait()
+	return firstErr
+}
+
+func (session *Session) sendStream(s *Stream) error {
+	fmt.Printf("sending stream %v on the wire\n", s)
+	// If no file has been set with SetFile, setup a socketpair.
+	if s.remote == nil {
+		local, remote, err := Socketpair()
+		if err != nil {
+			return fmt.Errorf("socketpair: %v", err)
+		}
+		s.SetFile(remote)
+		s.local = local
+	}
+	defer s.remote.Close()
+	data := s.infoMsg().Bytes()
+	fds := []int{int(s.remote.Fd())}
+	if err := session.conn.Send(data, fds); err != nil {
+		return fmt.Errorf("send: %s", err)
+	}
+	return nil
+}
+
+func (session *Session) sendLoop() error {
+	var id int
+	if session.isServer {
+		id = 2
+	} else {
+		id = 1
+	}
+	for s := range session.chSend {
+		s.id = uint32(id)
+		if _, exists := session.streams[s.id]; exists {
+			panic("outgoing id conflict")
+		}
+		session.streams[s.id] = s
+		for _, fn := range s.onId {
+			fn(s.Id())
+		}
+		// Send on the wire
+		err := session.sendStream(s)
+		if s.chErr != nil {
+			s.chErr <-err
+		}
+		if err != nil {
+			return err
+		}
+		if id+2 > 0xffffffff {
+			return fmt.Errorf("can't allocate new id: uint32 overflow")
+		}
+		id += 2
+	}
+	return nil
+}
+
+func (session *Session) receiveLoop() (e error) {
+	defer func() {
+		if e == nil {
+			session.connError = io.EOF
+		} else {
+			session.connError = e
+		}
+		close(session.chReceive)
+	}()
+	var id int
+	if session.isServer {
+		id = 1
+	} else {
+		id = 2
+	}
 	for {
 		buf, fds, err := session.conn.Receive()
 		if err != nil {
-			return nil, fmt.Errorf("receive: %s", err)
+			return fmt.Errorf("receive: %s", err)
 		}
 		if len(fds) >= 1 {
 			// We received at least one fd.
@@ -88,10 +148,11 @@ func (session *Session) Receive() (stream *Stream, e error) {
 					fmt.Printf("Rejecting invalid stream parent-id: %s\n", err)
 					continue
 				} else {
-					parent = session.Get(uint32(parentId64))
-					if parent == nil {
+					if p, exists := session.streams[uint32(parentId64)]; !exists {
 						fmt.Printf("Rejecting stream with non-existent parent-id %d\n", parentId64)
 						continue
+					} else {
+						parent = p
 					}
 				}
 			}
@@ -106,24 +167,45 @@ func (session *Session) Receive() (stream *Stream, e error) {
 				}
 			}
 			// Validate the stream id.
-			var id uint32
 			if id64, err := info.GetUint("id"); err != nil {
 				fmt.Printf("Skipping invalid stream id: %s\n", err)
 				continue
 			} else {
-				id = uint32(id64)
+				if int(id64) != id {
+					// Skip incorrect id.
+					// FIXME: send a protocol error
+					continue
+				}
+				s.id = uint32(id64)
 			}
-			s.id = id
 			s.local = os.NewFile(uintptr(fd), fmt.Sprintf("%d", fd))
 			s.metaLocal = os.NewFile(uintptr(metaFd), fmt.Sprintf("%d", fd))
-			if err := session.Set(id, s, true); err != nil {
-				fmt.Printf("Rejecting invalid stream id: %s\n", err)
+			if _, exists := session.streams[s.id]; exists {
+				// Skip stream with already existing id
+				// (this shouldn't happen because we increment the id every time anyway)
 				continue
 			}
-			return s, nil
+			session.streams[s.id] = s
+			session.chReceive <- s
 		}
+		id += 2
 	}
-	return nil, fmt.Errorf("unexpectedly reached end of read loop")
+	panic("Unreachable")
+	return nil
+}
+
+
+func (session *Session) Close() error {
+	close(session.chSend)
+	// FIXME: flush outgoing messages
+	return session.conn.Close()
+}
+
+func (session *Session) Receive() (stream *Stream, e error) {
+	if session.connError != nil {
+		return nil, session.connError
+	}
+	return <-session.chReceive, nil
 }
 
 func (session *Session) New(parent *Stream) *Stream {

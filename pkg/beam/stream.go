@@ -17,35 +17,19 @@ type Stream struct {
 	metaLocal  *os.File
 	metaRemote *os.File
 	session    *Session
+	// FIXME: this isn't needed once Server is merged into Session
+	onId       []func(int)
+	chErr      chan error
 }
 
-func (s *Stream) Send(presend ...func(id int)) error {
-	if s.id != 0 {
-		return fmt.Errorf("stream already registered as id=%d", s.id)
-	}
-	// If no file has been set with SetFile, setup a socketpair.
-	if s.remote == nil {
-		local, remote, err := Socketpair()
-		if err != nil {
-			return fmt.Errorf("socketpair: %s", err)
-		}
-		s.SetFile(remote)
-		s.local = local
-	}
-	// Register the new stream, setting id to 0 to auto-assign
-	if err := s.session.Set(0, s, false); err != nil {
-		return err
-	}
-	// Now we have the final ID
-	for _, fn := range presend {
-		fn(s.Id())
-	}
-	// FIXME: serialize sending to avoid race conditions in ID numbering
-	if err := s.session.conn.Send(s.infoMsg().Bytes(), []int{int(s.remote.Fd())}); err != nil {
-		return fmt.Errorf("send: %s", err)
-	}
-	s.remote.Close()
-	return nil
+func (s *Stream) OnId(fn func(int)) {
+	s.onId = append(s.onId, fn)
+}
+
+func (s *Stream) Send() error {
+	s.chErr = make(chan error)
+	s.session.chSend <-s
+	return <-s.chErr
 }
 
 func (s *Stream) New() *Stream {

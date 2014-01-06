@@ -28,7 +28,13 @@ func main() {
 	newJobs.Headers("content-type", "beam-job")
 	newJobs.HandleFunc(handleNewJob)
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
+	go func() {
+		if err := session.Run(); err != nil {
+			log.Fatal(err)
+		}
+		wg.Done()
+	}()
 	go func() {
 		handleUserInput(os.Stdin, srv)
 		wg.Done()
@@ -101,17 +107,23 @@ func handleUserInput(src io.Reader, srv *beam.Server) {
 		job.Metadata.Set("content-type", "beam-job")
 		{
 			cmdline := input.Text()
-			err := job.Send(func(id int) {
-				srv.NewRoute().Parent(id).Headers("name", "stdout").HandleFunc(func(st *beam.Stream) {
-					st.TailTo(os.Stdout, fmt.Sprintf("[%d/stdout] [%s] ", job.Id(), cmdline))
-				})
-				srv.NewRoute().Parent(id).Headers("name", "stderr").HandleFunc(func(st *beam.Stream) {
-					st.TailTo(os.Stderr, fmt.Sprintf("[%d/stderr] [%s] ", job.Id(), cmdline))
-				})
+			job.OnId(func(id int) {
+					srv.NewRoute().Parent(id).Headers("name", "stdout").HandleFunc(
+						func(st *beam.Stream) {
+							st.TailTo(os.Stdout, fmt.Sprintf("[%d/stdout] [%s] ", job.Id(), cmdline))
+						},
+					)
 			})
-			if err != nil {
-				log.Fatalf("send: %s", err)
-			}
+			job.OnId(func(id int) {
+					srv.NewRoute().Parent(id).Headers("name", "stderr").HandleFunc(
+						func(st *beam.Stream) {
+							st.TailTo(os.Stderr, fmt.Sprintf("[%d/stderr] [%s] ", job.Id(), cmdline))
+						},
+					)
+			})
+		}
+		if err := job.Send(); err != nil {
+			log.Fatalf("send: %s", err)
 		}
 		if _, err := job.Printf("%s\n", input.Text()); err != nil {
 			log.Fatalf("write: %s", err)
