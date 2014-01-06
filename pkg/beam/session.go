@@ -1,4 +1,4 @@
-package unix
+package beam
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"os"
 	"io"
 	"bufio"
-	"github.com/dotcloud/docker/pkg/beam2/data"
+	"github.com/dotcloud/docker/pkg/beam/data"
 )
 
 type Session struct {

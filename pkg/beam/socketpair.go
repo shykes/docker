@@ -1,4 +1,4 @@
-package unix
+package beam
 
 import (
 	"fmt"

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"net/http"
 	"log"
-	beam "github.com/dotcloud/docker/pkg/beam2"
+	"github.com/dotcloud/docker/pkg/beam"
 )
 
 func main() {
