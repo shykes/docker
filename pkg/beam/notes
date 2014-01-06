@@ -60,3 +60,9 @@ TRANSPORT:
 
 If metadata is in a separate fd, how do we represent initial headers? (ie headers which may be required to start
 processing the stream)
+
+---- 
+
+Simplest possible transport: implement SendBytes(b, headers) and SendFile(f, headers)
+	- unix transport sends files natively and fakes SendBytes (with a socketpair)
+	- tcp transport send bytes natively and fakes SendFile (with custom multiplexing)
