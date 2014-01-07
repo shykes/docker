@@ -109,3 +109,11 @@ func (s *Stream) Id() int {
 func (s *Stream) Parent() *Stream {
 	return s.parent
 }
+
+func (s *Stream) String() string {
+	var fd uintptr
+	if s.local != nil {
+		fd = s.local.Fd()
+	}
+	return fmt.Sprintf("(id=%d fd=%d headers=%s)", s.Id(), fd, s.Metadata.ShortString())
+}
