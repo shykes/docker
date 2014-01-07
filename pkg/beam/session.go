@@ -17,6 +17,7 @@ type Session struct {
 	chSend chan *Stream
 	streams map[uint32]*Stream
 	isServer bool
+	routes   []*Route
 }
 
 func New(conn *net.UnixConn, server bool) *Session {
@@ -31,7 +32,7 @@ func New(conn *net.UnixConn, server bool) *Session {
 
 func (session *Session) Run() error {
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	var firstErr error
 	go func() {
 		err := session.sendLoop()
@@ -47,21 +48,50 @@ func (session *Session) Run() error {
 		}
 		wg.Done()
 	}()
+	go func() {
+		err := session.serveLoop()
+		if firstErr == nil && err != nil {
+			firstErr = err
+		}
+		wg.Done()
+	}()
 	wg.Wait()
 	return firstErr
 }
 
-func (session *Session) sendStream(s *Stream) error {
-	fmt.Printf("sending stream %v on the wire\n", s)
-	// If no file has been set with SetFile, setup a socketpair.
-	if s.remote == nil {
-		local, remote, err := Socketpair()
-		if err != nil {
-			return fmt.Errorf("socketpair: %v", err)
+func (session *Session) NewRoute() *Route {
+	route := &Route{}
+	session.routes = append(session.routes, route)
+	return route
+}
+
+func (session *Session) serveLoop() error {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	for st := range session.chReceive {
+		var matched bool
+		for i := range session.routes {
+			// Last route added wins
+			route := session.routes[len(session.routes)-i-1]
+			if route.Match(st) {
+				matched = true
+				wg.Add(1)
+				go func(st *Stream) {
+					route.Handle(st)
+					st.Close()
+					wg.Done()
+				}(st)
+				break
+			}
 		}
-		s.SetFile(remote)
-		s.local = local
+		if !matched {
+			fmt.Printf("No route matched %s. Dropping\n", st)
+		}
 	}
+	return session.connError
+}
+
+func (session *Session) sendStream(s *Stream) error {
 	defer s.remote.Close()
 	data := s.infoMsg().Bytes()
 	fds := []int{int(s.remote.Fd())}
@@ -89,9 +119,7 @@ func (session *Session) sendLoop() error {
 		}
 		// Send on the wire
 		err := session.sendStream(s)
-		if s.chErr != nil {
-			s.chErr <-err
-		}
+		s.chErr <-err
 		if err != nil {
 			return err
 		}

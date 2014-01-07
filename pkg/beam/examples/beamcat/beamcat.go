@@ -22,13 +22,18 @@ func main() {
 	}
 	session := beam.New(sock, server)
 	defer session.Close()
-	srv := beam.NewServer(session)
-	newJobs := srv.NewRoute()
+	session.NewRoute().Headers("name", "stdout").HandleFunc(func(s *beam.Stream) {
+		s.TailTo(os.Stdout, "[stdout] ")
+	})
+	session.NewRoute().Headers("name", "stderr").HandleFunc(func(s *beam.Stream) {
+		s.TailTo(os.Stderr, "[stderr] ")
+	})
+	newJobs := session.NewRoute()
 	newJobs.Parent()
 	newJobs.Headers("content-type", "beam-job")
 	newJobs.HandleFunc(handleNewJob)
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(2)
 	go func() {
 		if err := session.Run(); err != nil {
 			log.Fatal(err)
@@ -36,13 +41,7 @@ func main() {
 		wg.Done()
 	}()
 	go func() {
-		handleUserInput(os.Stdin, srv)
-		wg.Done()
-	}()
-	go func() {
-		if err := srv.Serve(); err != nil {
-			fmt.Fprintf(os.Stderr, "serve: %s\n", err)
-		}
+		handleUserInput(os.Stdin, session)
 		wg.Done()
 	}()
 	wg.Wait()
@@ -95,10 +94,9 @@ func handleNewJob(st *beam.Stream) {
 	time.Sleep(42 * time.Millisecond)
 	job.Stdout.Close()
 	job.Stderr.Close()
-	job.Close()
 }
 
-func handleUserInput(src io.Reader, srv *beam.Server) {
+func handleUserInput(src io.Reader, session *beam.Session) {
 	defer fmt.Printf("handleUserInput done\n")
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -107,25 +105,8 @@ func handleUserInput(src io.Reader, srv *beam.Server) {
 		if err := input.Err(); err != nil {
 			log.Fatal("stdin: %s", err)
 		}
-		job := srv.Session().New(nil)
+		job := session.New(nil)
 		job.Metadata.Set("content-type", "beam-job")
-		{
-			cmdline := input.Text()
-			job.OnId(func(id int) {
-					srv.NewRoute().Parent(id).Headers("name", "stdout").HandleFunc(
-						func(st *beam.Stream) {
-							st.TailTo(os.Stdout, fmt.Sprintf("[%d/stdout] [%s] ", job.Id(), cmdline))
-						},
-					)
-			})
-			job.OnId(func(id int) {
-					srv.NewRoute().Parent(id).Headers("name", "stderr").HandleFunc(
-						func(st *beam.Stream) {
-							st.TailTo(os.Stderr, fmt.Sprintf("[%d/stderr] [%s] ", job.Id(), cmdline))
-						},
-					)
-			})
-		}
 		if err := job.Send(); err != nil {
 			log.Fatalf("send: %s", err)
 		}

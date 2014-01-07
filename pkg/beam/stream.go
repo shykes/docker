@@ -27,6 +27,15 @@ func (s *Stream) OnId(fn func(int)) {
 }
 
 func (s *Stream) Send() error {
+	// If no file has been set with SetFile, setup a socketpair.
+	if s.remote == nil {
+		local, remote, err := Socketpair()
+		if err != nil {
+			return fmt.Errorf("socketpair: %v", err)
+		}
+		s.SetFile(remote)
+		s.local = local
+	}
 	s.chErr = make(chan error)
 	s.session.chSend <-s
 	return <-s.chErr
