@@ -11,22 +11,22 @@ import (
 )
 
 type Session struct {
-	conn    *Conn
+	conn      *Conn
 	connError error
-	chReceive	chan *Stream
-	chSend chan *Stream
-	streams map[uint32]*Stream
-	isServer bool
-	routes   []*Route
+	chReceive chan *Stream
+	chSend    chan *Stream
+	streams   map[uint32]*Stream
+	isServer  bool
+	routes    []*Route
 }
 
 func New(conn *net.UnixConn, server bool) *Session {
 	return &Session{
-		conn:    &Conn{conn},
-		streams: make(map[uint32]*Stream),
-		isServer: server,
-		chReceive : make(chan *Stream, 4096),
-		chSend : make(chan *Stream, 4096),
+		conn:      &Conn{conn},
+		streams:   make(map[uint32]*Stream),
+		isServer:  server,
+		chReceive: make(chan *Stream, 4096),
+		chSend:    make(chan *Stream, 4096),
 	}
 }
 
@@ -36,14 +36,14 @@ func (session *Session) Run() error {
 	var firstErr error
 	go func() {
 		err := session.sendLoop()
-		if firstErr == nil && err != nil  {
+		if firstErr == nil && err != nil {
 			firstErr = err
 		}
 		wg.Done()
 	}()
 	go func() {
 		err := session.receiveLoop()
-		if firstErr == nil && err != nil  {
+		if firstErr == nil && err != nil {
 			firstErr = err
 		}
 		wg.Done()
@@ -119,7 +119,7 @@ func (session *Session) sendLoop() error {
 		}
 		// Send on the wire
 		err := session.sendStream(s)
-		s.chErr <-err
+		s.chErr <- err
 		if err != nil {
 			return err
 		}
@@ -221,7 +221,6 @@ func (session *Session) receiveLoop() (e error) {
 	panic("Unreachable")
 	return nil
 }
-
 
 func (session *Session) Close() error {
 	close(session.chSend)

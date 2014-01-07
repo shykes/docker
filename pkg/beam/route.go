@@ -64,4 +64,3 @@ func (r *Route) Handle(st *Stream) {
 	}
 	r.fn(st)
 }
-

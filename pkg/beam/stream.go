@@ -18,8 +18,8 @@ type Stream struct {
 	metaRemote *os.File
 	session    *Session
 	// FIXME: this isn't needed once Server is merged into Session
-	onId       []func(int)
-	chErr      chan error
+	onId  []func(int)
+	chErr chan error
 }
 
 func (s *Stream) OnId(fn func(int)) {
@@ -37,7 +37,7 @@ func (s *Stream) Send() error {
 		s.local = local
 	}
 	s.chErr = make(chan error)
-	s.session.chSend <-s
+	s.session.chSend <- s
 	return <-s.chErr
 }
 
