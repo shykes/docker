@@ -44,6 +44,11 @@ func (r *Route) Headers(pairs ...string) *Route {
 	return r
 }
 
+func (r *Route) MatcherFunc(filter func(*Stream) bool) *Route {
+	r.filters = append(r.filters, filter)
+	return r
+}
+
 func (r *Route) HandleFunc(fn func(*Stream)) *Route {
 	r.fn = fn
 	return r

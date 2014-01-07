@@ -22,12 +22,6 @@ func main() {
 	}
 	session := beam.New(sock, server)
 	defer session.Close()
-	session.NewRoute().Headers("name", "stdout").HandleFunc(func(s *beam.Stream) {
-		s.TailTo(os.Stdout, "[stdout] ")
-	})
-	session.NewRoute().Headers("name", "stderr").HandleFunc(func(s *beam.Stream) {
-		s.TailTo(os.Stderr, "[stderr] ")
-	})
 	newJobs := session.NewRoute()
 	newJobs.Parent()
 	newJobs.Headers("content-type", "beam-job")
@@ -107,6 +101,12 @@ func handleUserInput(src io.Reader, session *beam.Session) {
 		}
 		job := session.New(nil)
 		job.Metadata.Set("content-type", "beam-job")
+		job.NewRoute().Headers("name", "stdout").HandleFunc(func(st *beam.Stream) {
+			st.TailTo(os.Stdout, fmt.Sprintf("%s [stdout] ", st.Parent()))
+		})
+		job.NewRoute().Headers("name", "stderr").HandleFunc(func(st *beam.Stream) {
+			st.TailTo(os.Stdout, fmt.Sprintf("%s [stderr] ", st.Parent()))
+		})
 		if err := job.Send(); err != nil {
 			log.Fatalf("send: %s", err)
 		}

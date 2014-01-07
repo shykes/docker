@@ -45,6 +45,19 @@ func (s *Stream) New() *Stream {
 	return s.session.New(s)
 }
 
+func (s *Stream) NewRoute() *Route {
+	defer func() {
+		fmt.Printf("NewRoute() done\n")
+	}()
+	return s.session.NewRoute().MatcherFunc(func(ms *Stream) bool {
+		parent := ms.Parent()
+		if parent == nil {
+			return false
+		}
+		return parent.Id() == s.Id()
+	})
+}
+
 func (s *Stream) infoMsg() data.Msg {
 	info := make(data.Msg)
 	info.SetInt("id", int64(s.id))
