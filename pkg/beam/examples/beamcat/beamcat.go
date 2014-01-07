@@ -81,6 +81,10 @@ func handleNewJob(st *beam.Stream) {
 		jobListen(job)
 	case "exec":
 		jobExec(job)
+	case "echo":
+		jobEcho(job)
+	case "cat":
+		jobCat(job)
 	default:
 		{
 			job.Stderr.Printf("No such command: %s\n", job.Name)
@@ -296,5 +300,28 @@ func jobDownload(job *Job) {
 	}
 	job.Stderr.Printf("%s\n", resp.Status)
 	io.Copy(job.Stdout, resp.Body)
+	job.Printf("status=0\n")
+}
+
+func jobEcho(job *Job) {
+	job.Stdout.Printf("%#v\n", job.Args)
+	time.Sleep(1 * time.Second)
+}
+
+func jobCat(job *Job) {
+	if len(job.Args) != 1 {
+		job.Stderr.Printf("Usage: %s filename\n", job.Name)
+		job.Stderr.Printf("status=1\n")
+		return
+	}
+	f, err := os.Open(job.Args[0])
+	if err != nil {
+		job.Stderr.Printf("open: %s\n", err)
+		job.Stderr.Printf("status=1\n")
+		return
+	}
+	fStream := job.New()
+	fStream.SetFile(f)
+	fStream.Send()
 	job.Printf("status=0\n")
 }
