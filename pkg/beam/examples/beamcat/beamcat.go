@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/dotcloud/docker/pkg/beam"
+	"github.com/dotcloud/docker/pkg/beam/jobs"
 	"io"
 	"log"
 	"net"
@@ -12,7 +13,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"time"
+	"syscall"
 )
 
 func main() {
@@ -22,10 +23,13 @@ func main() {
 	}
 	session := beam.New(sock, server)
 	defer session.Close()
-	newJobs := session.NewRoute()
-	newJobs.Parent()
-	newJobs.Headers("content-type", "beam-job")
-	newJobs.HandleFunc(handleNewJob)
+	srv := jobs.NewServer()
+	srv.Register("download", jobDownload)
+	srv.Register("listen", jobListen)
+	srv.Register("exec", jobExec)
+	srv.Register("echo", jobEcho)
+	srv.Register("cat", jobCat)
+	srv.Bind(session)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -41,55 +45,6 @@ func main() {
 	wg.Wait()
 }
 
-func handleNewJob(st *beam.Stream) {
-	fmt.Printf("---> New job\n")
-	scanner := bufio.NewScanner(st)
-	scanner.Scan()
-	if err := scanner.Err(); err != nil {
-		log.Fatal("read from peer: %s", err)
-	}
-	fmt.Printf("---> %s\n", scanner.Text())
-	words := strings.Split(strings.Trim(scanner.Text(), " \t"), " ")
-	job := &Job{
-		Stream: st,
-		Name:   words[0],
-		Args:   words[1:],
-	}
-	job.Printf("job-name=%s\n", job.Name)
-	job.Printf("job-args=%s\n", strings.Join(job.Args, "\x00"))
-	job.Stdout = job.New()
-	job.Stdout.Metadata.Set("name", "stdout")
-	if err := job.Stdout.Send(); err != nil {
-		log.Fatalf("send stdout: %s", err)
-	}
-	job.Stderr = job.New()
-	job.Stderr.Metadata.Set("name", "stderr")
-	if err := job.Stderr.Send(); err != nil {
-		log.Fatalf("send stderr: %s", err)
-	}
-	switch job.Name {
-	case "download":
-		jobDownload(job)
-	case "listen":
-		jobListen(job)
-	case "exec":
-		jobExec(job)
-	case "echo":
-		jobEcho(job)
-	case "cat":
-		jobCat(job)
-	default:
-		{
-			job.Stderr.Printf("No such command: %s\n", job.Name)
-			job.Printf("status=2\n")
-		}
-	}
-	// FIXME: WHY DOES Stream.local.Sync() not fix the race condition arggghhh
-	time.Sleep(42 * time.Millisecond)
-	job.Stdout.Close()
-	job.Stderr.Close()
-}
-
 func handleUserInput(src io.Reader, session *beam.Session) {
 	defer fmt.Printf("handleUserInput done\n")
 	var wg sync.WaitGroup
@@ -101,6 +56,9 @@ func handleUserInput(src io.Reader, session *beam.Session) {
 		}
 		job := session.New(nil)
 		job.Metadata.Set("content-type", "beam-job")
+		job.NewRoute().HandleFunc(func(st *beam.Stream) {
+			st.TailTo(os.Stdout, fmt.Sprintf("%s [%d] ", st.Parent(), st.Id()))
+		})
 		job.NewRoute().Headers("name", "stdout").HandleFunc(func(st *beam.Stream) {
 			st.TailTo(os.Stdout, fmt.Sprintf("%s [stdout] ", st.Parent()))
 		})
@@ -166,11 +124,10 @@ func connectGram(filename string) (conn *net.UnixConn, server bool, err error) {
 	return conn, false, nil
 }
 
-func jobListen(job *Job) {
+func jobListen(job *jobs.Job) jobs.Status {
 	if len(job.Args) < 2 {
 		job.Stderr.Printf("Usage: %s PROTO ADDRESS\n", job.Name)
-		job.Printf("status=1\n")
-		return
+		return jobs.StatusErr
 	}
 	proto := job.Args[0]
 	addr := job.Args[1]
@@ -178,15 +135,13 @@ func jobListen(job *Job) {
 	l, err := net.Listen(proto, addr)
 	if err != nil {
 		job.Stderr.Printf("listen: %s\n", err)
-		job.Printf("status=1\n")
-		return
+		return jobs.StatusErr
 	}
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			job.Stderr.Printf("accept: %s\n", err)
-			job.Printf("status=1\n")
-			return
+			return jobs.StatusErr
 		}
 		job.Stderr.Printf("New connection from %s\n", conn.RemoteAddr())
 		st := job.New()
@@ -206,8 +161,7 @@ func jobListen(job *Job) {
 		// be closed. However, if metadata is sent on a separate fd, how will that be closed?
 		if err := st.Send(); err != nil {
 			job.Stderr.Printf("send: %s\n", err)
-			job.Printf("status=1\n")
-			return
+			return jobs.StatusErr
 		}
 		if !hasFile {
 			go func() {
@@ -218,6 +172,7 @@ func jobListen(job *Job) {
 			}()
 		}
 	}
+	return jobs.StatusOK
 }
 
 type HasFile interface {
@@ -245,64 +200,58 @@ func Splice(a, b io.ReadWriter) (err error) {
 	return
 }
 
-func jobExec(job *Job) {
+func jobExec(job *jobs.Job) jobs.Status {
 	cmd := exec.Command("sh", "-c", strings.Join(job.Args, " "))
 	cmd.Stdout = job.Stdout
 	cmd.Stderr = job.Stderr
 	if err := cmd.Run(); err != nil {
 		job.Stderr.Printf("error: %s\n", err)
-		job.Printf("status=127\n")
-		return
+		return jobs.StatusErr
 	}
-	job.Printf("status=%s\n", cmd.ProcessState)
+	unixStatus, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok {
+		job.Stderr.Printf("error: exit status unavailable\n")
+		return jobs.StatusErr
+	}
+	return jobs.Status(unixStatus.ExitStatus())
 }
 
-type Job struct {
-	*beam.Stream
-	Name   string
-	Args   []string
-	Stdout *beam.Stream
-	Stderr *beam.Stream
-}
 
-func jobDownload(job *Job) {
+func jobDownload (job *jobs.Job) jobs.Status {
 	if len(job.Args) < 1 {
 		job.Stderr.Printf("Usage: %s URL\n", job.Name)
-		job.Printf("status=1\n")
-		return
+		return jobs.StatusErr
 	}
 	url := job.Args[0]
 	job.Stderr.Printf("Downloading from %s\n", url)
 	resp, err := http.Get(url)
 	if err != nil {
 		job.Stderr.Printf("GET %s: %s\n", url, err)
-		job.Printf("status=1\n")
-		return
+		return jobs.StatusErr
 	}
 	job.Stderr.Printf("%s\n", resp.Status)
 	io.Copy(job.Stdout, resp.Body)
-	job.Printf("status=0\n")
+	return jobs.StatusOK
 }
 
-func jobEcho(job *Job) {
+func jobEcho (job *jobs.Job) jobs.Status {
 	job.Stdout.Printf("%#v\n", job.Args)
-	time.Sleep(1 * time.Second)
+	return jobs.StatusOK
 }
 
-func jobCat(job *Job) {
+func jobCat (job *jobs.Job) jobs.Status {
 	if len(job.Args) != 1 {
 		job.Stderr.Printf("Usage: %s filename\n", job.Name)
-		job.Stderr.Printf("status=1\n")
-		return
+		return jobs.StatusErr
 	}
 	f, err := os.Open(job.Args[0])
 	if err != nil {
 		job.Stderr.Printf("open: %s\n", err)
-		job.Stderr.Printf("status=1\n")
-		return
+		return jobs.StatusErr
 	}
 	fStream := job.New()
 	fStream.SetFile(f)
 	fStream.Send()
-	job.Printf("status=0\n")
+	fStream.Close()
+	return jobs.StatusOK
 }
