@@ -35,6 +35,13 @@ func (m Msg) Get(k string) string {
 	return ""
 }
 
+func (m Msg) GetAll(k string) []string {
+	if values, exists := m[m.transformKey(k)]; exists {
+		return values
+	}
+	return nil
+}
+
 func (m Msg) String() string {
 	return string(m.Bytes())
 }
