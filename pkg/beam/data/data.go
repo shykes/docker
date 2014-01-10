@@ -19,12 +19,12 @@ type StructuredStream interface {
 // It stores multiple values per key, so it can be used to carry scalars and arrays.
 type Msg map[string][]string
 
-func (m Msg) Add(k, v string) {
+func (m Msg) Add(k string, newValues...string) {
 	values, exists := m[m.transformKey(k)]
 	if !exists {
-		m.Set(k, v)
+		m[m.transformKey(k)] = newValues
 	} else {
-		m[m.transformKey(k)] = append(values, v)
+		m[m.transformKey(k)] = append(values, newValues...)
 	}
 }
 
@@ -68,8 +68,8 @@ func (m Msg) Exists(k string) bool {
 	return exists
 }
 
-func (m Msg) Set(k, v string) {
-	m[m.transformKey(k)] = []string{v}
+func (m Msg) Set(k string, values ...string) {
+	m[m.transformKey(k)] = values
 }
 
 func (m Msg) transformKey(k string) string {
