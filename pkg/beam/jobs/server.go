@@ -1,15 +1,12 @@
 package jobs
 
 import (
-	"bufio"
 	"github.com/dotcloud/docker/pkg/beam"
 	"fmt"
 	"strings"
 )
 
-type Server struct {
-	handlers map[string]Handler
-}
+type JobHandler func(*Job) Status
 
 type Job struct {
 	*beam.Stream
@@ -19,8 +16,6 @@ type Job struct {
 	Stderr *beam.Stream
 }
 
-type Handler func(*Job) Status
-
 type Status int
 
 const (
@@ -29,62 +24,35 @@ const (
 	StatusNotFound Status = 127
 )
 
-func NewServer() *Server {
-	return &Server{
-		handlers: make(map[string]Handler),
-	}
+func (h JobHandler) Send(st *beam.Stream) error {
+	go h.handle(st)
+	return nil
 }
 
-func (srv *Server) Bind(sessions ...*beam.Session) *Server {
-	for _, s := range sessions {
-		r := s.NewRoute()
-		r.Parent().Headers("content-type", "beam-job").HandleFunc(srv.handleStream)
-	}
-	return srv
-}
-
-func (srv *Server) Register(name string, handler Handler) *Server {
-	srv.handlers[name] = handler
-	return srv
-}
-
-func (srv *Server) handleStream(st *beam.Stream) {
-	fmt.Printf("---> New job\n")
-	scanner := bufio.NewScanner(st)
-	scanner.Scan()
-	if err := scanner.Err(); err != nil {
-		return
-	}
-	fmt.Printf("---> %s\n", scanner.Text())
-	words := strings.Split(strings.Trim(scanner.Text(), " \t"), " ")
+func (h JobHandler) handle(st *beam.Stream) error {
 	job := &Job{
 		Stream: st,
-		Name:   words[0],
-		Args:   words[1:],
+		Name:	st.Header().Get("name"),
+		Args:   st.Header().GetAll("args"),
 	}
+	fmt.Printf("---> %s %s\n", job.Name, job.Args)
 	job.Printf("job-name=%s\n", job.Name)
 	job.Printf("job-args=%s\n", strings.Join(job.Args, "\x00"))
 	job.Stdout = job.New()
 	job.Stdout.Metadata.Set("name", "stdout")
 	if err := job.Stdout.Send(); err != nil {
-		return
+		return err
 	}
 	defer job.Stdout.Close()
 	job.Stderr = job.New()
 	job.Stderr.Metadata.Set("name", "stderr")
 	if err := job.Stderr.Send(); err != nil {
-		return
+		return err
 	}
 	defer job.Stderr.Close()
-	handler, exists := srv.handlers[job.Name]
-	if !exists {
-		handler = srv.notFoundHandler
+	status := h(job)
+	if _, err := job.Printf("status=%d\n", status); err != nil {
+		return err
 	}
-	status := handler(job)
-	job.Printf("status=%d\n", status)
-}
-
-func (srv *Server) notFoundHandler(job *Job) Status {
-	job.Stderr.Printf("no such command: %s\n", job.Name)
-	return StatusNotFound
+	return nil
 }

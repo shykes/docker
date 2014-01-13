@@ -17,13 +17,9 @@ type Stream struct {
 	metaLocal  *os.File
 	metaRemote *os.File
 	session    *Session
-	// FIXME: this isn't needed once Server is merged into Session
-	onId  []func(int)
 	chErr chan error
-}
-
-func (s *Stream) OnId(fn func(int)) {
-	s.onId = append(s.onId, fn)
+	err   error
+	chReceive chan *Stream
 }
 
 func (s *Stream) Send() error {
@@ -41,21 +37,16 @@ func (s *Stream) Send() error {
 	return <-s.chErr
 }
 
-func (s *Stream) New() *Stream {
-	return s.session.New(s)
+
+func (s *Stream) Receive() (*Stream, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return <-s.chReceive, s.err
 }
 
-func (s *Stream) NewRoute() *Route {
-	defer func() {
-		fmt.Printf("NewRoute() done\n")
-	}()
-	return s.session.NewRoute().MatcherFunc(func(ms *Stream) bool {
-		parent := ms.Parent()
-		if parent == nil {
-			return false
-		}
-		return parent.Id() == s.Id()
-	})
+func (s *Stream) New() *Stream {
+	return s.session.New(s)
 }
 
 func (s *Stream) infoMsg() data.Msg {
@@ -139,3 +130,9 @@ func (s *Stream) String() string {
 	}
 	return fmt.Sprintf("(id=%d fd=%d headers=%s)", s.Id(), fd, s.Metadata.ShortString())
 }
+
+// Initial message attached to a stream at creation
+func (s *Stream) Header() data.Msg {
+	return s.Metadata
+}
+

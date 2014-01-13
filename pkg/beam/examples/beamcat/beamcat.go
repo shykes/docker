@@ -6,6 +6,7 @@ import (
 	"github.com/dotcloud/docker/pkg/beam"
 	"github.com/dotcloud/docker/pkg/beam/jobs"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -23,19 +24,42 @@ func main() {
 	}
 	session := beam.New(sock, server)
 	defer session.Close()
-	srv := jobs.NewServer()
-	srv.Register("download", jobDownload)
-	srv.Register("listen", jobListen)
-	srv.Register("exec", jobExec)
-	srv.Register("echo", jobEcho)
-	srv.Register("cat", jobCat)
-	srv.Bind(session)
+	r := beam.NewRouter()
+	r.NewRoute().Name("download").Handler(jobs.JobHandler(jobDownload))
+	r.NewRoute().Name("listen").Handler(jobs.JobHandler(jobListen))
+	r.NewRoute().Name("exec").Handler(jobs.JobHandler(jobExec))
+	r.NewRoute().Name("echo").Handler(jobs.JobHandler(jobEcho))
+	r.NewRoute().Name("cat").Handler(jobs.JobHandler(jobCat))
+	newJobs := make(map[string]*beam.Stream)
+	r.NewRoute().Name("register").HandleFunc(func(st *beam.Stream) {
+		for _, name := range st.Header().GetAll("args") {
+			fmt.Printf("Registering %s for %s\n", st, name)
+			newJobs[name] = st
+		}
+	})
+	r.NewRoute().MatcherFunc(func (st *beam.Stream) bool {
+		_, exists := newJobs[st.Header().Get("name")]
+		return exists
+	}).HandleFunc(func(st *beam.Stream) {
+		worker := newJobs[st.Header().Get("name")]
+		dest := worker.New()
+		dest.Header().Set("name", st.Header().Get("name"))
+		dest.Header().Set("args", st.Header().GetAll("args")...)
+		if f, err := dest.GetFile(); err != nil {
+			go func() {
+				Splice(dest, st)
+				dest.Close()
+			}()
+		} else {
+			dest.SetFile(f)
+		}
+		dest.Send()
+	})
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
-		if err := session.Run(); err != nil {
-			log.Fatal(err)
-		}
+		//beam.CopyStreams(r, session)
+		r.ReceiveFrom(session)
 		wg.Done()
 	}()
 	go func() {
@@ -44,6 +68,16 @@ func main() {
 	}()
 	wg.Wait()
 }
+
+// FIXME encode job name & args into headers, to merge job routing & stream routing
+// (eg a job can be routed simply with .Headers("job-name", "exec")
+//
+// FIXME merge headers "job-name" and "name". Maybe a job is nothing more than a stream
+// with a name. A convention for dependency injection, whether it's "stdout", "exec" or "db"
+//
+// FIXME: use Send/Receive as boundary instead of callbacks. You can always wrap a callback into
+// 
+
 
 func handleUserInput(src io.Reader, session *beam.Session) {
 	defer fmt.Printf("handleUserInput done\n")
@@ -56,31 +90,34 @@ func handleUserInput(src io.Reader, session *beam.Session) {
 		}
 		job := session.New(nil)
 		job.Metadata.Set("content-type", "beam-job")
-		job.NewRoute().HandleFunc(func(st *beam.Stream) {
+		words := strings.Split(strings.Trim(input.Text(), " \t"), " ")
+		job.Metadata.Set("name", words[0])
+		job.Metadata.Set("args", words[1:]...)
+		router := beam.NewRouter()
+		router.NewRoute().HandleFunc(func(st *beam.Stream) {
 			st.TailTo(os.Stdout, fmt.Sprintf("%s [%d] ", st.Parent(), st.Id()))
 		})
-		job.NewRoute().Headers("name", "stdout").HandleFunc(func(st *beam.Stream) {
+		router.NewRoute().Headers("name", "stdout").HandleFunc(func(st *beam.Stream) {
 			st.TailTo(os.Stdout, fmt.Sprintf("%s [stdout] ", st.Parent()))
 		})
-		job.NewRoute().Headers("name", "stderr").HandleFunc(func(st *beam.Stream) {
-			st.TailTo(os.Stdout, fmt.Sprintf("%s [stderr] ", st.Parent()))
+		router.NewRoute().Headers("name", "stderr").HandleFunc(func(st *beam.Stream) {
+			st.TailTo(os.Stderr, fmt.Sprintf("%s [stderr] ", st.Parent()))
 		})
+		wg.Add(2)
+		go func() {
+			io.Copy(ioutil.Discard, job)
+			job.Close()
+			fmt.Printf("%s closed\n", job)
+			wg.Done()
+		}()
+		go func() {
+			router.ReceiveFrom(job)
+			router.Close()
+			wg.Done()
+		}()
 		if err := job.Send(); err != nil {
 			log.Fatalf("send: %s", err)
 		}
-		if _, err := job.Printf("%s\n", input.Text()); err != nil {
-			log.Fatalf("write: %s", err)
-		}
-		wg.Add(1)
-		go func(cmdline string) {
-			err := job.TailTo(os.Stdout, fmt.Sprintf("[%d] [%s] ", job.Id(), cmdline))
-			if err != nil {
-				log.Printf("Error reading from stream: %s", err)
-			}
-			job.Close()
-			fmt.Printf("[%d] [%s] Closed\n", job.Id(), cmdline)
-			wg.Done()
-		}(input.Text())
 	}
 }
 
@@ -131,7 +168,7 @@ func jobListen(job *jobs.Job) jobs.Status {
 	}
 	proto := job.Args[0]
 	addr := job.Args[1]
-	job.Stderr.Printf("Listening on %s/%s", proto, addr)
+	job.Stderr.Printf("Listening on %s/%s\n", proto, addr)
 	l, err := net.Listen(proto, addr)
 	if err != nil {
 		job.Stderr.Printf("listen: %s\n", err)
@@ -163,6 +200,7 @@ func jobListen(job *jobs.Job) jobs.Status {
 			job.Stderr.Printf("send: %s\n", err)
 			return jobs.StatusErr
 		}
+		/*
 		if !hasFile {
 			go func() {
 				st.Printf("---> Splice\n")
@@ -171,6 +209,7 @@ func jobListen(job *jobs.Job) jobs.Status {
 				st.Close()
 			}()
 		}
+		*/
 	}
 	return jobs.StatusOK
 }

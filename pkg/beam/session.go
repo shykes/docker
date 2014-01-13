@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"sync"
 )
 
 type Session struct {
@@ -21,74 +20,16 @@ type Session struct {
 }
 
 func New(conn *net.UnixConn, server bool) *Session {
-	return &Session{
+	session := &Session{
 		conn:      &Conn{conn},
 		streams:   make(map[uint32]*Stream),
 		isServer:  server,
 		chReceive: make(chan *Stream, 4096),
 		chSend:    make(chan *Stream, 4096),
 	}
-}
-
-func (session *Session) Run() error {
-	var wg sync.WaitGroup
-	wg.Add(3)
-	var firstErr error
-	go func() {
-		err := session.sendLoop()
-		if firstErr == nil && err != nil {
-			firstErr = err
-		}
-		wg.Done()
-	}()
-	go func() {
-		err := session.receiveLoop()
-		if firstErr == nil && err != nil {
-			firstErr = err
-		}
-		wg.Done()
-	}()
-	go func() {
-		err := session.serveLoop()
-		if firstErr == nil && err != nil {
-			firstErr = err
-		}
-		wg.Done()
-	}()
-	wg.Wait()
-	return firstErr
-}
-
-func (session *Session) NewRoute() *Route {
-	route := &Route{}
-	session.routes = append(session.routes, route)
-	return route
-}
-
-func (session *Session) serveLoop() error {
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	for st := range session.chReceive {
-		var matched bool
-		for i := range session.routes {
-			// Last route added wins
-			route := session.routes[len(session.routes)-i-1]
-			if route.Match(st) {
-				matched = true
-				wg.Add(1)
-				go func(st *Stream) {
-					route.Handle(st)
-					st.Close()
-					wg.Done()
-				}(st)
-				break
-			}
-		}
-		if !matched {
-			fmt.Printf("No route matched %s. Dropping\n", st)
-		}
-	}
-	return session.connError
+	go session.sendLoop()
+	go session.receiveLoop()
+	return session
 }
 
 func (session *Session) sendStream(s *Stream) error {
@@ -114,9 +55,6 @@ func (session *Session) sendLoop() error {
 			panic("outgoing id conflict")
 		}
 		session.streams[s.id] = s
-		for _, fn := range s.onId {
-			fn(s.Id())
-		}
 		// Send on the wire
 		err := session.sendStream(s)
 		s.chErr <- err
@@ -214,7 +152,12 @@ func (session *Session) receiveLoop() (e error) {
 				continue
 			}
 			session.streams[s.id] = s
-			session.chReceive <- s
+			fmt.Printf("--> %s\n", s)
+			if s.parent == nil {
+				session.chReceive <-s
+			} else {
+				s.parent.chReceive <-s
+			}
 		}
 		id += 2
 	}
@@ -232,7 +175,7 @@ func (session *Session) Receive() (stream *Stream, e error) {
 	if session.connError != nil {
 		return nil, session.connError
 	}
-	return <-session.chReceive, nil
+	return <-session.chReceive, session.connError
 }
 
 func (session *Session) New(parent *Stream) *Stream {
@@ -240,5 +183,6 @@ func (session *Session) New(parent *Stream) *Stream {
 		parent:   parent,
 		session:  session,
 		Metadata: make(data.Msg),
+		chReceive: make(chan *Stream, 4096),
 	}
 }
