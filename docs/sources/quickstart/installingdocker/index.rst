@@ -24,7 +24,7 @@ Contents:
    archlinux
    gentoolinux
    frugalware
-   vagrant
+   mac
    windows
    amazon
    rackspace
