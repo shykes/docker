@@ -12,5 +12,4 @@ Contents:
 
    sysreq
    installingdocker/index
-   upgrading
    uninstalling
