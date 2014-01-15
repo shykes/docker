@@ -85,6 +85,12 @@ VM and calling ``apt-get``:
    sudo apt-get install lxc-docker
 
 
+Uninstalling
+------------
+
+TODO
+
+
 Run
 ---
 

@@ -185,6 +185,17 @@ To install the latest version of docker, use the standard ``apt-get`` method:
    sudo apt-get install lxc-docker
 
 
+Uninstalling
+------------
+
+To remove docker from your ubuntu system simply uninstall its package:
+
+
+.. code-block:: bash
+
+    apt-get remove lxc-docker
+
+
 .. _ufw:
 
 Docker and UFW

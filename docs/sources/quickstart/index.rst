@@ -12,4 +12,3 @@ Contents:
 
    sysreq
    installingdocker/index
-   uninstalling
