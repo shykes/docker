@@ -31,4 +31,3 @@ Contents:
    google
    kernel
    binaries
-   security

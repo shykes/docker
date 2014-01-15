@@ -12,5 +12,6 @@ Contents:
 
    commandline/index
    builder
+   security
    api/index
    terms/index
