@@ -29,5 +29,4 @@ Contents:
    amazon
    rackspace
    google
-   kernel
    binaries

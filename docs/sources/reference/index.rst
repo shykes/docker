@@ -13,5 +13,6 @@ Contents:
    commandline/index
    builder
    security
+   kernel
    api/index
    terms/index
