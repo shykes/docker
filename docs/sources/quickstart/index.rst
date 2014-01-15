@@ -10,5 +10,4 @@ Contents:
 .. toctree::
    :maxdepth: 1
 
-   sysreq
    installingdocker/index
