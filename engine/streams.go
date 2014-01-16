@@ -92,6 +92,10 @@ func (o *Output) Write(p []byte) (n int, err error) {
 	return len(p), firstErr
 }
 
+func (o *Output) Printf(format string, args ...interface{}) (int, error) {
+	return fmt.Fprintf(o, format, args...)
+}
+
 // Close unregisters all destinations and waits for all background
 // AddTail and AddString tasks to complete.
 // The Close method of each destination is called if it exists.
