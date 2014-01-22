@@ -41,24 +41,25 @@ its dependencies. There are two main ways to install this tool:
 
 ###Native Installation
 
-* Install sphinx: `pip install sphinx`
-    * Mac OS X: `[sudo] pip-2.7 install sphinx`
-* Install sphinx httpdomain contrib package: `pip install sphinxcontrib-httpdomain`
-    * Mac OS X: `[sudo] pip-2.7 install sphinxcontrib-httpdomain`
-* If pip is not available you can probably install it using your favorite package manager as **python-pip**
+Install dependencies from `requirements.txt` file in your `docker/docs`
+directory:
+
+* Linux: `pip install -r docs/requirements.txt`
+
+* Mac OS X: `[sudo] pip-2.7 install -r docs/requirements.txt`
 
 ###Alternative Installation: Docker Container
 
 If you're running ``docker`` on your development machine then you may
-find it easier and cleaner to use the Dockerfile. This installs Sphinx
+find it easier and cleaner to use the docs Dockerfile. This installs Sphinx
 in a container, adds the local ``docs/`` directory and builds the HTML
 docs inside the container, even starting a simple HTTP server on port
-8000 so that you can connect and see your changes. Just run ``docker
-build .`` and run the resulting image. This is the equivalent to
-``make clean server`` since each container starts clean.
+8000 so that you can connect and see your changes.
 
-In the ``docs/`` directory, run:
-    ```docker build -t docker:docs . && docker run -p 8000:8000 docker:docs```
+In the ``docker`` source directory, run:
+    ```make docs```
+
+This is the equivalent to ``make clean server`` since each container starts clean.
 
 Usage
 -----
@@ -127,7 +128,8 @@ Guides on using sphinx
 
 * Code examples
 
-  * Start without $, so it's easy to copy and paste.
+  * Start typed commands with ``$ `` (dollar space) so that they 
+    are easily differentiated from program output.
   * Use "sudo" with docker to ensure that your command is runnable
     even if they haven't [used the *docker*
     group](http://docs.docker.io/en/latest/use/basics/#why-sudo).
@@ -136,7 +138,7 @@ Manpages
 --------
 
 * To make the manpages, run ``make man``. Please note there is a bug
-  in spinx 1.1.3 which makes this fail.  Upgrade to the latest version
+  in Sphinx 1.1.3 which makes this fail.  Upgrade to the latest version
   of Sphinx.
 * Then preview the manpage by running ``man _build/man/docker.1``,
   where ``_build/man/docker.1`` is the path to the generated manfile

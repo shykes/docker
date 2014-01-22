@@ -1,12 +1,17 @@
 package docker
 
 import (
+	"bufio"
+	"bytes"
 	"code.google.com/p/go.net/websocket"
 	"encoding/base64"
 	"encoding/json"
+	"expvar"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
 	"github.com/dotcloud/docker/auth"
+	"github.com/dotcloud/docker/engine"
+	"github.com/dotcloud/docker/pkg/systemd"
 	"github.com/dotcloud/docker/utils"
 	"github.com/gorilla/mux"
 	"io"
@@ -15,6 +20,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/exec"
 	"regexp"
@@ -23,7 +29,7 @@ import (
 )
 
 const (
-	APIVERSION        = 1.7
+	APIVERSION        = 1.9
 	DEFAULTHTTPHOST   = "127.0.0.1"
 	DEFAULTHTTPPORT   = 4243
 	DEFAULTUNIXSOCKET = "/var/run/docker.sock"
@@ -66,13 +72,13 @@ func httpError(w http.ResponseWriter, err error) {
 	// create appropriate error types with clearly defined meaning.
 	if strings.Contains(err.Error(), "No such") {
 		statusCode = http.StatusNotFound
-	} else if strings.HasPrefix(err.Error(), "Bad parameter") {
+	} else if strings.Contains(err.Error(), "Bad parameter") {
 		statusCode = http.StatusBadRequest
-	} else if strings.HasPrefix(err.Error(), "Conflict") {
+	} else if strings.Contains(err.Error(), "Conflict") {
 		statusCode = http.StatusConflict
-	} else if strings.HasPrefix(err.Error(), "Impossible") {
+	} else if strings.Contains(err.Error(), "Impossible") {
 		statusCode = http.StatusNotAcceptable
-	} else if strings.HasPrefix(err.Error(), "Wrong login/password") {
+	} else if strings.Contains(err.Error(), "Wrong login/password") {
 		statusCode = http.StatusUnauthorized
 	} else if strings.Contains(err.Error(), "hasn't been activated") {
 		statusCode = http.StatusForbidden
@@ -135,7 +141,9 @@ func postAuth(srv *Server, version float64, w http.ResponseWriter, r *http.Reque
 }
 
 func getVersion(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	return writeJSON(w, http.StatusOK, srv.DockerVersion())
+	w.Header().Set("Content-Type", "application/json")
+	srv.Eng.ServeHTTP(w, r)
+	return nil
 }
 
 func postContainersKill(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
@@ -145,19 +153,11 @@ func postContainersKill(srv *Server, version float64, w http.ResponseWriter, r *
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	name := vars["name"]
-
-	signal := 0
-	if r != nil {
-		if s := r.Form.Get("signal"); s != "" {
-			s, err := strconv.Atoi(s)
-			if err != nil {
-				return err
-			}
-			signal = s
-		}
+	job := srv.Eng.Job("kill", vars["name"])
+	if sig := r.Form.Get("signal"); sig != "" {
+		job.Args = append(job.Args, sig)
 	}
-	if err := srv.ContainerKill(name, signal); err != nil {
+	if err := job.Run(); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -168,10 +168,11 @@ func getContainersExport(srv *Server, version float64, w http.ResponseWriter, r 
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-
-	if err := srv.ContainerExport(name, w); err != nil {
-		utils.Errorf("%s", err)
+	job := srv.Eng.Job("export", vars["name"])
+	if err := job.Stdout.Add(w); err != nil {
+		return err
+	}
+	if err := job.Run(); err != nil {
 		return err
 	}
 	return nil
@@ -182,26 +183,45 @@ func getImagesJSON(srv *Server, version float64, w http.ResponseWriter, r *http.
 		return err
 	}
 
-	all, err := getBoolParam(r.Form.Get("all"))
-	if err != nil {
+	var (
+		err  error
+		outs *engine.Table
+		job  = srv.Eng.Job("images")
+	)
+
+	job.Setenv("filter", r.Form.Get("filter"))
+	job.Setenv("all", r.Form.Get("all"))
+
+	if version > 1.8 {
+		job.Stdout.Add(w)
+	} else if outs, err = job.Stdout.AddListTable(); err != nil {
 		return err
 	}
-	filter := r.Form.Get("filter")
 
-	outs, err := srv.Images(all, filter)
-	if err != nil {
+	if err := job.Run(); err != nil {
 		return err
 	}
 
-	if version < 1.7 {
-		outs2 := []APIImagesOld{}
-		for _, ctnr := range outs {
-			outs2 = append(outs2, ctnr.ToLegacy()...)
+	if version < 1.8 && outs != nil { // Convert to legacy format
+		outsLegacy := engine.NewTable("Created", 0)
+		for _, out := range outs.Data {
+			for _, repoTag := range out.GetList("RepoTags") {
+				parts := strings.Split(repoTag, ":")
+				outLegacy := &engine.Env{}
+				outLegacy.Set("Repository", parts[0])
+				outLegacy.Set("Tag", parts[1])
+				outLegacy.Set("ID", out.Get("ID"))
+				outLegacy.SetInt64("Created", out.GetInt64("Created"))
+				outLegacy.SetInt64("Size", out.GetInt64("Size"))
+				outLegacy.SetInt64("VirtualSize", out.GetInt64("VirtualSize"))
+				outsLegacy.Add(outLegacy)
+			}
 		}
-
-		return writeJSON(w, http.StatusOK, outs2)
+		if _, err := outsLegacy.WriteListTo(w); err != nil {
+			return err
+		}
 	}
-	return writeJSON(w, http.StatusOK, outs)
+	return nil
 }
 
 func getImagesViz(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
@@ -209,15 +229,14 @@ func getImagesViz(srv *Server, version float64, w http.ResponseWriter, r *http.R
 		w.WriteHeader(http.StatusNotFound)
 		return fmt.Errorf("This is now implemented in the client.")
 	}
-
-	if err := srv.ImagesViz(w); err != nil {
-		return err
-	}
+	srv.Eng.ServeHTTP(w, r)
 	return nil
 }
 
 func getInfo(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	return writeJSON(w, http.StatusOK, srv.DockerInfo())
+	w.Header().Set("Content-Type", "application/json")
+	srv.Eng.ServeHTTP(w, r)
+	return nil
 }
 
 func getEvents(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
@@ -254,7 +273,7 @@ func getEvents(srv *Server, version float64, w http.ResponseWriter, r *http.Requ
 	wf.Flush()
 	if since != 0 {
 		// If since, send previous events that happened after the timestamp
-		for _, event := range srv.events {
+		for _, event := range srv.GetEvents() {
 			if event.Time >= since {
 				err := sendEvent(wf, &event)
 				if err != nil && err.Error() == "JSON error" {
@@ -282,26 +301,24 @@ func getImagesHistory(srv *Server, version float64, w http.ResponseWriter, r *ht
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-	outs, err := srv.ImageHistory(name)
-	if err != nil {
+
+	var job = srv.Eng.Job("history", vars["name"])
+	job.Stdout.Add(w)
+
+	if err := job.Run(); err != nil {
 		return err
 	}
-
-	return writeJSON(w, http.StatusOK, outs)
+	return nil
 }
 
 func getContainersChanges(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-	changesStr, err := srv.ContainerChanges(name)
-	if err != nil {
-		return err
-	}
+	var job = srv.Eng.Job("changes", vars["name"])
+	job.Stdout.Add(w)
 
-	return writeJSON(w, http.StatusOK, changesStr)
+	return job.Run()
 }
 
 func getContainersTop(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
@@ -314,11 +331,10 @@ func getContainersTop(srv *Server, version float64, w http.ResponseWriter, r *ht
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	procsStr, err := srv.ContainerTop(vars["name"], r.Form.Get("ps_args"))
-	if err != nil {
-		return err
-	}
-	return writeJSON(w, http.StatusOK, procsStr)
+
+	job := srv.Eng.Job("top", vars["name"], r.Form.Get("ps_args"))
+	job.Stdout.Add(w)
+	return job.Run()
 }
 
 func getContainersJSON(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
@@ -357,18 +373,13 @@ func postImagesTag(srv *Server, version float64, w http.ResponseWriter, r *http.
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	repo := r.Form.Get("repo")
-	tag := r.Form.Get("tag")
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-	force, err := getBoolParam(r.Form.Get("force"))
-	if err != nil {
-		return err
-	}
 
-	if err := srv.ContainerTag(name, repo, tag, force); err != nil {
+	job := srv.Eng.Job("tag", vars["name"], r.Form.Get("repo"), r.Form.Get("tag"))
+	job.Setenv("force", r.Form.Get("force"))
+	if err := job.Run(); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -383,13 +394,17 @@ func postCommit(srv *Server, version float64, w http.ResponseWriter, r *http.Req
 	if err := json.NewDecoder(r.Body).Decode(config); err != nil && err != io.EOF {
 		utils.Errorf("%s", err)
 	}
-	repo := r.Form.Get("repo")
-	tag := r.Form.Get("tag")
-	container := r.Form.Get("container")
-	author := r.Form.Get("author")
-	comment := r.Form.Get("comment")
-	id, err := srv.ContainerCommit(container, repo, tag, author, comment, config)
-	if err != nil {
+
+	job := srv.Eng.Job("commit", r.Form.Get("container"))
+	job.Setenv("repo", r.Form.Get("repo"))
+	job.Setenv("tag", r.Form.Get("tag"))
+	job.Setenv("author", r.Form.Get("author"))
+	job.Setenv("comment", r.Form.Get("comment"))
+	job.SetenvJson("config", config)
+
+	var id string
+	job.Stdout.AddString(&id)
+	if err := job.Run(); err != nil {
 		return err
 	}
 
@@ -451,38 +466,54 @@ func getImagesSearch(srv *Server, version float64, w http.ResponseWriter, r *htt
 	if err := parseForm(r); err != nil {
 		return err
 	}
+	var (
+		authEncoded = r.Header.Get("X-Registry-Auth")
+		authConfig  = &auth.AuthConfig{}
+		metaHeaders = map[string][]string{}
+	)
 
-	term := r.Form.Get("term")
-	outs, err := srv.ImagesSearch(term)
-	if err != nil {
-		return err
+	if authEncoded != "" {
+		authJson := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
+		if err := json.NewDecoder(authJson).Decode(authConfig); err != nil {
+			// for a search it is not an error if no auth was given
+			// to increase compatibility with the existing api it is defaulting to be empty
+			authConfig = &auth.AuthConfig{}
+		}
+	}
+	for k, v := range r.Header {
+		if strings.HasPrefix(k, "X-Meta-") {
+			metaHeaders[k] = v
+		}
 	}
 
-	return writeJSON(w, http.StatusOK, outs)
+	var job = srv.Eng.Job("search", r.Form.Get("term"))
+	job.SetenvJson("metaHeaders", metaHeaders)
+	job.SetenvJson("authConfig", authConfig)
+	job.Stdout.Add(w)
+
+	return job.Run()
 }
 
 func postImagesInsert(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if err := parseForm(r); err != nil {
 		return err
 	}
-
-	url := r.Form.Get("url")
-	path := r.Form.Get("path")
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
 	if version > 1.0 {
 		w.Header().Set("Content-Type", "application/json")
 	}
-	sf := utils.NewStreamFormatter(version > 1.0)
-	err := srv.ImageInsert(name, url, path, w, sf)
-	if err != nil {
-		if sf.Used() {
-			w.Write(sf.FormatError(err))
-			return nil
+
+	job := srv.Eng.Job("insert", vars["name"], r.Form.Get("url"), r.Form.Get("path"))
+	job.SetenvBool("json", version > 1.0)
+	job.Stdout.Add(w)
+	if err := job.Run(); err != nil {
+		if !job.Stdout.Used() {
+			return err
 		}
-		return err
+		sf := utils.NewStreamFormatter(version > 1.0)
+		w.Write(sf.FormatError(err))
 	}
 
 	return nil
@@ -535,15 +566,23 @@ func postImagesPush(srv *Server, version float64, w http.ResponseWriter, r *http
 }
 
 func getImagesGet(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	name := vars["name"]
+	if vars == nil {
+		return fmt.Errorf("Missing parameter")
+	}
 	if version > 1.0 {
 		w.Header().Set("Content-Type", "application/x-tar")
 	}
-	return srv.ImageExport(name, w)
+	job := srv.Eng.Job("image_export", vars["name"])
+	if err := job.Stdout.Add(w); err != nil {
+		return err
+	}
+	return job.Run()
 }
 
 func postImagesLoad(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	return srv.ImageLoad(r.Body)
+	job := srv.Eng.Job("load")
+	job.Stdin.Add(r.Body)
+	return job.Run()
 }
 
 func postContainersCreate(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
@@ -564,22 +603,28 @@ func postContainersCreate(srv *Server, version float64, w http.ResponseWriter, r
 		job.SetenvList("Dns", defaultDns)
 	}
 	// Read container ID from the first line of stdout
-	job.StdoutParseString(&out.ID)
+	job.Stdout.AddString(&out.ID)
 	// Read warnings from stderr
-	job.StderrParseLines(&out.Warnings, 0)
+	warnings := &bytes.Buffer{}
+	job.Stderr.Add(warnings)
 	if err := job.Run(); err != nil {
 		return err
 	}
-	if job.GetenvInt("Memory") > 0 && !srv.runtime.capabilities.MemoryLimit {
+	// Parse warnings from stderr
+	scanner := bufio.NewScanner(warnings)
+	for scanner.Scan() {
+		out.Warnings = append(out.Warnings, scanner.Text())
+	}
+	if job.GetenvInt("Memory") > 0 && !srv.runtime.sysInfo.MemoryLimit {
 		log.Println("WARNING: Your kernel does not support memory limit capabilities. Limitation discarded.")
 		out.Warnings = append(out.Warnings, "Your kernel does not support memory limit capabilities. Limitation discarded.")
 	}
-	if job.GetenvInt("Memory") > 0 && !srv.runtime.capabilities.SwapLimit {
+	if job.GetenvInt("Memory") > 0 && !srv.runtime.sysInfo.SwapLimit {
 		log.Println("WARNING: Your kernel does not support swap limit capabilities. Limitation discarded.")
 		out.Warnings = append(out.Warnings, "Your kernel does not support memory swap capabilities. Limitation discarded.")
 	}
 
-	if !job.GetenvBool("NetworkDisabled") && srv.runtime.capabilities.IPv4ForwardingDisabled {
+	if !job.GetenvBool("NetworkDisabled") && srv.runtime.sysInfo.IPv4ForwardingDisabled {
 		log.Println("Warning: IPv4 forwarding is disabled.")
 		out.Warnings = append(out.Warnings, "IPv4 forwarding is disabled.")
 	}
@@ -591,15 +636,12 @@ func postContainersRestart(srv *Server, version float64, w http.ResponseWriter, 
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	t, err := strconv.Atoi(r.Form.Get("t"))
-	if err != nil || t < 0 {
-		t = 10
-	}
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-	if err := srv.ContainerRestart(name, t); err != nil {
+	job := srv.Eng.Job("restart", vars["name"])
+	job.Setenv("t", r.Form.Get("t"))
+	if err := job.Run(); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -613,18 +655,10 @@ func deleteContainers(srv *Server, version float64, w http.ResponseWriter, r *ht
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-
-	removeVolume, err := getBoolParam(r.Form.Get("v"))
-	if err != nil {
-		return err
-	}
-	removeLink, err := getBoolParam(r.Form.Get("link"))
-	if err != nil {
-		return err
-	}
-
-	if err := srv.ContainerDestroy(name, removeVolume, removeLink); err != nil {
+	job := srv.Eng.Job("container_delete", vars["name"])
+	job.Setenv("removeVolume", r.Form.Get("v"))
+	job.Setenv("removeLink", r.Form.Get("link"))
+	if err := job.Run(); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -678,17 +712,12 @@ func postContainersStop(srv *Server, version float64, w http.ResponseWriter, r *
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	t, err := strconv.Atoi(r.Form.Get("t"))
-	if err != nil || t < 0 {
-		t = 10
-	}
-
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-
-	if err := srv.ContainerStop(name, t); err != nil {
+	job := srv.Eng.Job("stop", vars["name"])
+	job.Setenv("t", r.Form.Get("t"))
+	if err := job.Run(); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -699,33 +728,28 @@ func postContainersWait(srv *Server, version float64, w http.ResponseWriter, r *
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-
-	status, err := srv.ContainerWait(name)
+	job := srv.Eng.Job("wait", vars["name"])
+	var statusStr string
+	job.Stdout.AddString(&statusStr)
+	if err := job.Run(); err != nil {
+		return err
+	}
+	// Parse a 16-bit encoded integer to map typical unix exit status.
+	status, err := strconv.ParseInt(statusStr, 10, 16)
 	if err != nil {
 		return err
 	}
-
-	return writeJSON(w, http.StatusOK, &APIWait{StatusCode: status})
+	return writeJSON(w, http.StatusOK, &APIWait{StatusCode: int(status)})
 }
 
 func postContainersResize(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	height, err := strconv.Atoi(r.Form.Get("h"))
-	if err != nil {
-		return err
-	}
-	width, err := strconv.Atoi(r.Form.Get("w"))
-	if err != nil {
-		return err
-	}
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
-	if err := srv.ContainerResize(name, height, width); err != nil {
+	if err := srv.Eng.Job("resize", vars["name"], r.Form.Get("h"), r.Form.Get("w")).Run(); err != nil {
 		return err
 	}
 	return nil
@@ -735,33 +759,11 @@ func postContainersAttach(srv *Server, version float64, w http.ResponseWriter, r
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	logs, err := getBoolParam(r.Form.Get("logs"))
-	if err != nil {
-		return err
-	}
-	stream, err := getBoolParam(r.Form.Get("stream"))
-	if err != nil {
-		return err
-	}
-	stdin, err := getBoolParam(r.Form.Get("stdin"))
-	if err != nil {
-		return err
-	}
-	stdout, err := getBoolParam(r.Form.Get("stdout"))
-	if err != nil {
-		return err
-	}
-	stderr, err := getBoolParam(r.Form.Get("stderr"))
-	if err != nil {
-		return err
-	}
-
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
 
-	c, err := srv.ContainerInspect(name)
+	c, err := srv.ContainerInspect(vars["name"])
 	if err != nil {
 		return err
 	}
@@ -796,51 +798,46 @@ func postContainersAttach(srv *Server, version float64, w http.ResponseWriter, r
 		errStream = outStream
 	}
 
-	if err := srv.ContainerAttach(name, logs, stream, stdin, stdout, stderr, inStream, outStream, errStream); err != nil {
+	job := srv.Eng.Job("attach", vars["name"])
+	job.Setenv("logs", r.Form.Get("logs"))
+	job.Setenv("stream", r.Form.Get("stream"))
+	job.Setenv("stdin", r.Form.Get("stdin"))
+	job.Setenv("stdout", r.Form.Get("stdout"))
+	job.Setenv("stderr", r.Form.Get("stderr"))
+	job.Stdin.Add(inStream)
+	job.Stdout.Add(outStream)
+	job.Stderr.Add(errStream)
+	if err := job.Run(); err != nil {
 		fmt.Fprintf(outStream, "Error: %s\n", err)
+
 	}
 	return nil
 }
 
 func wsContainersAttach(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	logs, err := getBoolParam(r.Form.Get("logs"))
-	if err != nil {
-		return err
-	}
-	stream, err := getBoolParam(r.Form.Get("stream"))
-	if err != nil {
-		return err
-	}
-	stdin, err := getBoolParam(r.Form.Get("stdin"))
-	if err != nil {
-		return err
-	}
-	stdout, err := getBoolParam(r.Form.Get("stdout"))
-	if err != nil {
-		return err
-	}
-	stderr, err := getBoolParam(r.Form.Get("stderr"))
-	if err != nil {
-		return err
-	}
-
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
 
-	if _, err := srv.ContainerInspect(name); err != nil {
+	if _, err := srv.ContainerInspect(vars["name"]); err != nil {
 		return err
 	}
 
 	h := websocket.Handler(func(ws *websocket.Conn) {
 		defer ws.Close()
-
-		if err := srv.ContainerAttach(name, logs, stream, stdin, stdout, stderr, ws, ws, ws); err != nil {
+		job := srv.Eng.Job("attach", vars["name"])
+		job.Setenv("logs", r.Form.Get("logs"))
+		job.Setenv("stream", r.Form.Get("stream"))
+		job.Setenv("stdin", r.Form.Get("stdin"))
+		job.Setenv("stdout", r.Form.Get("stdout"))
+		job.Setenv("stderr", r.Form.Get("stderr"))
+		job.Stdin.Add(ws)
+		job.Stdout.Add(ws)
+		job.Stderr.Add(ws)
+		if err := job.Run(); err != nil {
 			utils.Errorf("Error: %s", err)
 		}
 	})
@@ -865,7 +862,10 @@ func getContainersByName(srv *Server, version float64, w http.ResponseWriter, r 
 		return fmt.Errorf("Conflict between containers and images")
 	}
 
-	return writeJSON(w, http.StatusOK, container)
+	container.readHostConfig()
+	c := APIContainer{container, container.hostConfig}
+
+	return writeJSON(w, http.StatusOK, c)
 }
 
 func getImagesByName(srv *Server, version float64, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
@@ -891,12 +891,41 @@ func postBuild(srv *Server, version float64, w http.ResponseWriter, r *http.Requ
 	if version < 1.3 {
 		return fmt.Errorf("Multipart upload for build is no longer supported. Please upgrade your docker client.")
 	}
-	remoteURL := r.FormValue("remote")
-	repoName := r.FormValue("t")
-	rawSuppressOutput := r.FormValue("q")
-	rawNoCache := r.FormValue("nocache")
-	rawRm := r.FormValue("rm")
-	repoName, tag := utils.ParseRepositoryTag(repoName)
+	var (
+		remoteURL         = r.FormValue("remote")
+		repoName          = r.FormValue("t")
+		rawSuppressOutput = r.FormValue("q")
+		rawNoCache        = r.FormValue("nocache")
+		rawRm             = r.FormValue("rm")
+		authEncoded       = r.Header.Get("X-Registry-Auth")
+		authConfig        = &auth.AuthConfig{}
+		configFileEncoded = r.Header.Get("X-Registry-Config")
+		configFile        = &auth.ConfigFile{}
+		tag               string
+	)
+	repoName, tag = utils.ParseRepositoryTag(repoName)
+
+	// This block can be removed when API versions prior to 1.9 are deprecated.
+	// Both headers will be parsed and sent along to the daemon, but if a non-empty
+	// ConfigFile is present, any value provided as an AuthConfig directly will
+	// be overridden. See BuildFile::CmdFrom for details.
+	if version < 1.9 && authEncoded != "" {
+		authJson := base64.NewDecoder(base64.URLEncoding, strings.NewReader(authEncoded))
+		if err := json.NewDecoder(authJson).Decode(authConfig); err != nil {
+			// for a pull it is not an error if no auth was given
+			// to increase compatibility with the existing api it is defaulting to be empty
+			authConfig = &auth.AuthConfig{}
+		}
+	}
+
+	if configFileEncoded != "" {
+		configFileJson := base64.NewDecoder(base64.URLEncoding, strings.NewReader(configFileEncoded))
+		if err := json.NewDecoder(configFileJson).Decode(configFile); err != nil {
+			// for a pull it is not an error if no auth was given
+			// to increase compatibility with the existing api it is defaulting to be empty
+			configFile = &auth.ConfigFile{}
+		}
+	}
 
 	var context io.Reader
 
@@ -916,13 +945,13 @@ func postBuild(srv *Server, version float64, w http.ResponseWriter, r *http.Requ
 			return fmt.Errorf("Error trying to use git: %s (%s)", err, output)
 		}
 
-		c, err := archive.Tar(root, archive.Bzip2)
+		c, err := archive.Tar(root, archive.Uncompressed)
 		if err != nil {
 			return err
 		}
 		context = c
 	} else if utils.IsURL(remoteURL) {
-		f, err := utils.Download(remoteURL, ioutil.Discard)
+		f, err := utils.Download(remoteURL)
 		if err != nil {
 			return err
 		}
@@ -951,9 +980,26 @@ func postBuild(srv *Server, version float64, w http.ResponseWriter, r *http.Requ
 		return err
 	}
 
-	b := NewBuildFile(srv, utils.NewWriteFlusher(w), !suppressOutput, !noCache, rm)
+	if version >= 1.8 {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	sf := utils.NewStreamFormatter(version >= 1.8)
+	b := NewBuildFile(srv,
+		&StdoutFormater{
+			Writer:          utils.NewWriteFlusher(w),
+			StreamFormatter: sf,
+		},
+		&StderrFormater{
+			Writer:          utils.NewWriteFlusher(w),
+			StreamFormatter: sf,
+		},
+		!suppressOutput, !noCache, rm, utils.NewWriteFlusher(w), sf, authConfig, configFile)
 	id, err := b.Build(context)
 	if err != nil {
+		if sf.Used() {
+			w.Write(sf.FormatError(err))
+			return nil
+		}
 		return fmt.Errorf("Error build: %s", err)
 	}
 	if repoName != "" {
@@ -966,7 +1012,6 @@ func postContainersCopy(srv *Server, version float64, w http.ResponseWriter, r *
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
-	name := vars["name"]
 
 	copyData := &APICopy{}
 	contentType := r.Header.Get("Content-Type")
@@ -985,9 +1030,10 @@ func postContainersCopy(srv *Server, version float64, w http.ResponseWriter, r *
 		copyData.Resource = copyData.Resource[1:]
 	}
 
-	if err := srv.ContainerCopy(name, copyData.Resource, w); err != nil {
+	job := srv.Eng.Job("container_copy", vars["name"], copyData.Resource)
+	job.Stdout.Add(w)
+	if err := job.Run(); err != nil {
 		utils.Errorf("%s", err.Error())
-		return err
 	}
 	return nil
 }
@@ -1026,7 +1072,7 @@ func makeHttpHandler(srv *Server, logging bool, localMethod string, localRoute s
 		}
 
 		if version == 0 || version > APIVERSION {
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, fmt.Errorf("client and server don't have same version (client : %g, server: %g)", version, APIVERSION).Error(), http.StatusNotFound)
 			return
 		}
 
@@ -1037,9 +1083,37 @@ func makeHttpHandler(srv *Server, logging bool, localMethod string, localRoute s
 	}
 }
 
+// Replicated from expvar.go as not public.
+func expvarHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	fmt.Fprintf(w, "{\n")
+	first := true
+	expvar.Do(func(kv expvar.KeyValue) {
+		if !first {
+			fmt.Fprintf(w, ",\n")
+		}
+		first = false
+		fmt.Fprintf(w, "%q: %s", kv.Key, kv.Value)
+	})
+	fmt.Fprintf(w, "\n}\n")
+}
+
+func AttachProfiler(router *mux.Router) {
+	router.HandleFunc("/debug/vars", expvarHandler)
+	router.HandleFunc("/debug/pprof/", pprof.Index)
+	router.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	router.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	router.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	router.HandleFunc("/debug/pprof/heap", pprof.Handler("heap").ServeHTTP)
+	router.HandleFunc("/debug/pprof/goroutine", pprof.Handler("goroutine").ServeHTTP)
+	router.HandleFunc("/debug/pprof/threadcreate", pprof.Handler("threadcreate").ServeHTTP)
+}
+
 func createRouter(srv *Server, logging bool) (*mux.Router, error) {
 	r := mux.NewRouter()
-
+	if os.Getenv("DEBUG") != "" {
+		AttachProfiler(r)
+	}
 	m := map[string]map[string]HttpApiFunc{
 		"GET": {
 			"/events":                         getEvents,
@@ -1126,8 +1200,6 @@ func ServeRequest(srv *Server, apiversion float64, w http.ResponseWriter, req *h
 }
 
 func ListenAndServe(proto, addr string, srv *Server, logging bool) error {
-	log.Printf("Listening for HTTP on %s (%s)\n", addr, proto)
-
 	r, err := createRouter(srv, logging)
 	if err != nil {
 		return err
@@ -1158,5 +1230,9 @@ func ListenAndServe(proto, addr string, srv *Server, logging bool) error {
 		}
 	}
 	httpSrv := http.Server{Addr: addr, Handler: r}
+
+	log.Printf("Listening for HTTP on %s (%s)\n", addr, proto)
+	// Tell the init daemon we are accepting requests
+	go systemd.SdNotify("READY=1")
 	return httpSrv.Serve(l)
 }

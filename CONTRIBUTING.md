@@ -4,6 +4,13 @@ Want to hack on Docker? Awesome! Here are instructions to get you
 started. They are probably not perfect, please let us know if anything
 feels wrong or incomplete.
 
+## Reporting Issues
+
+When reporting [issues](https://github.com/dotcloud/docker/issues) 
+on Github please include your host OS ( Ubuntu 12.04, Fedora 19, etc... )
+and the output of `docker version` along with the output of `docker info` if possible.  
+This information will help us review and fix your issue faster.
+
 ## Build Environment
 
 For instructions on setting up your development environment, please
@@ -64,7 +71,7 @@ your branch before submitting a pull request.
 
 Update the documentation when creating or modifying features. Test
 your documentation changes for clarity, concision, and correctness, as
-well as a clean docmuent build. See ``docs/README.md`` for more
+well as a clean documentation build. See ``docs/README.md`` for more
 information on building the docs and how docs get released.
 
 Write clean code. Universally formatted code promotes ease of writing, reading,
@@ -98,23 +105,71 @@ name and email address match your git configuration. The AUTHORS file is
 regenerated occasionally from the git commit history, so a mismatch may result
 in your changes being overwritten.
 
-### Approval
+### Sign your work
 
-Docker maintainers use LGTM (looks good to me) in comments on the code review
-to indicate acceptance.
+The sign-off is a simple line at the end of the explanation for the
+patch, which certifies that you wrote it or otherwise have the right to
+pass it on as an open-source patch.  The rules are pretty simple: if you
+can certify the below:
 
-A change requires LGTMs from an absolute majority of the maintainers of each
-component affected. For example, if a change affects docs/ and registry/, it
-needs an absolute majority from the maintainers of docs/ AND, separately, an
-absolute majority of the maintainers of registry
+```
+Docker Developer Grant and Certificate of Origin 1.1
 
-For more details see [MAINTAINERS.md](hack/MAINTAINERS.md)
+By making a contribution to the Docker Project ("Project"), I represent and
+warrant that:
+
+a. The contribution was created in whole or in part by me and I have the right
+to submit the contribution on my own behalf or on behalf of a third party who
+has authorized me to submit this contribution to the Project; or
+
+b. The contribution is based upon previous work that, to the best of my
+knowledge, is covered under an appropriate open source license and I have the
+right and authorization to submit that work with modifications, whether
+created in whole or in part by me, under the same open source license (unless
+I am permitted to submit under a different license) that I have identified in
+the contribution; or
+
+c. The contribution was provided directly to me by some other person who
+represented and warranted (a) or (b) and I have not modified it.
+
+d. I understand and agree that this Project and the contribution are publicly
+known and that a record of the contribution (including all personal
+information I submit with it, including my sign-off record) is maintained
+indefinitely and may be redistributed consistent with this Project or the open
+source license(s) involved.
+```
+
+then you just add a line to every git commit message:
+
+    Docker-DCO-1.1-Signed-off-by: Joe Smith <joe.smith@email.com> (github: github_handle)
+
+using your real name (sorry, no pseudonyms or anonymous contributions.)
+
+One way to automate this, is customise your get ``commit.template`` by adding
+the following to your ``.git/hooks/prepare-commit-msg`` script (needs 
+``chmod 755 .git/hooks/prepare-commit-msg`` ) in the docker checkout:
+
+```
+   #!/bin/sh
+   #       Auto sign all commits to allow them to be used by the Docker project.
+   #       see https://github.com/dotcloud/docker/blob/master/CONTRIBUTING.md#sign-your-work
+   #
+   GH_USER=$(git config --get github.user)
+   SOB=$(git var GIT_AUTHOR_IDENT | sed -n "s/^\(.*>\).*$/Docker-DCO-1.1-Signed-off-by: \1 \(github: $GH_USER\)/p")
+   grep -qs "^$SOB" "$1" || echo "\n$SOB" >> "$1"
+
+```
+
+If you have any questions, please refer to the FAQ in the [docs](http://docs.docker.io)
+
+
 
 ### How can I become a maintainer?
 
 * Step 1: learn the component inside out
 * Step 2: make yourself useful by contributing code, bugfixes, support etc.
 * Step 3: volunteer on the irc channel (#docker@freenode)
+* Step 4: propose yourself at a scheduled #docker-meeting
 
 Don't forget: being a maintainer is a time investment. Make sure you will have time to make yourself available.
 You don't have to be a maintainer to make a difference on the project!

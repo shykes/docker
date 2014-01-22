@@ -1,51 +1,6 @@
 package docker
 
-import "strings"
-
 type (
-	APIHistory struct {
-		ID        string   `json:"Id"`
-		Tags      []string `json:",omitempty"`
-		Created   int64
-		CreatedBy string `json:",omitempty"`
-		Size      int64
-	}
-
-	APIImages struct {
-		ID          string   `json:"Id"`
-		RepoTags    []string `json:",omitempty"`
-		Created     int64
-		Size        int64
-		VirtualSize int64
-		ParentId    string `json:",omitempty"`
-	}
-
-	APIImagesOld struct {
-		Repository  string `json:",omitempty"`
-		Tag         string `json:",omitempty"`
-		ID          string `json:"Id"`
-		Created     int64
-		Size        int64
-		VirtualSize int64
-	}
-
-	APIInfo struct {
-		Debug              bool
-		Containers         int
-		Images             int
-		Driver             string      `json:",omitempty"`
-		DriverStatus       [][2]string `json:",omitempty"`
-		NFd                int         `json:",omitempty"`
-		NGoroutines        int         `json:",omitempty"`
-		MemoryLimit        bool        `json:",omitempty"`
-		SwapLimit          bool        `json:",omitempty"`
-		IPv4Forwarding     bool        `json:",omitempty"`
-		LXCVersion         string      `json:",omitempty"`
-		NEventsListener    int         `json:",omitempty"`
-		KernelVersion      string      `json:",omitempty"`
-		IndexServerAddress string      `json:",omitempty"`
-	}
-
 	APITop struct {
 		Titles    []string
 		Processes [][]string
@@ -95,12 +50,6 @@ type (
 		IP          string
 	}
 
-	APIVersion struct {
-		Version   string
-		GitCommit string `json:",omitempty"`
-		GoVersion string `json:",omitempty"`
-	}
-
 	APIWait struct {
 		StatusCode int
 	}
@@ -118,23 +67,11 @@ type (
 		Resource string
 		HostPath string
 	}
-)
-
-func (api APIImages) ToLegacy() []APIImagesOld {
-	outs := []APIImagesOld{}
-	for _, repotag := range api.RepoTags {
-		components := strings.SplitN(repotag, ":", 2)
-		outs = append(outs, APIImagesOld{
-			ID:          api.ID,
-			Repository:  components[0],
-			Tag:         components[1],
-			Created:     api.Created,
-			Size:        api.Size,
-			VirtualSize: api.VirtualSize,
-		})
+	APIContainer struct {
+		*Container
+		HostConfig *HostConfig
 	}
-	return outs
-}
+)
 
 func (api APIContainers) ToLegacy() *APIContainersOld {
 	return &APIContainersOld{

@@ -3,6 +3,8 @@ package archive
 import (
 	"archive/tar"
 	"bytes"
+	"compress/bzip2"
+	"compress/gzip"
 	"fmt"
 	"github.com/dotcloud/docker/utils"
 	"io"
@@ -11,6 +13,8 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
+	"syscall"
 )
 
 type Archive io.Reader
@@ -59,6 +63,43 @@ func DetectCompression(source []byte) Compression {
 	return Uncompressed
 }
 
+func xzDecompress(archive io.Reader) (io.Reader, error) {
+	args := []string{"xz", "-d", "-c", "-q"}
+
+	return CmdStream(exec.Command(args[0], args[1:]...), archive, nil)
+}
+
+func DecompressStream(archive io.Reader) (io.Reader, error) {
+	buf := make([]byte, 10)
+	totalN := 0
+	for totalN < 10 {
+		n, err := archive.Read(buf[totalN:])
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("Tarball too short")
+			}
+			return nil, err
+		}
+		totalN += n
+		utils.Debugf("[tar autodetect] n: %d", n)
+	}
+	compression := DetectCompression(buf)
+	wrap := io.MultiReader(bytes.NewReader(buf), archive)
+
+	switch compression {
+	case Uncompressed:
+		return wrap, nil
+	case Gzip:
+		return gzip.NewReader(wrap)
+	case Bzip2:
+		return bzip2.NewReader(wrap), nil
+	case Xz:
+		return xzDecompress(wrap)
+	default:
+		return nil, fmt.Errorf("Unsupported compression format %s", (&compression).Extension())
+	}
+}
+
 func (compression *Compression) Flag() string {
 	switch *compression {
 	case Bzip2:
@@ -83,6 +124,84 @@ func (compression *Compression) Extension() string {
 		return "tar.xz"
 	}
 	return ""
+}
+
+func createTarFile(path, extractDir string, hdr *tar.Header, reader *tar.Reader) error {
+	switch hdr.Typeflag {
+	case tar.TypeDir:
+		// Create directory unless it exists as a directory already.
+		// In that case we just want to merge the two
+		if fi, err := os.Lstat(path); !(err == nil && fi.IsDir()) {
+			if err := os.Mkdir(path, os.FileMode(hdr.Mode)); err != nil {
+				return err
+			}
+		}
+
+	case tar.TypeReg, tar.TypeRegA:
+		// Source is regular file
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, os.FileMode(hdr.Mode))
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(file, reader); err != nil {
+			file.Close()
+			return err
+		}
+		file.Close()
+
+	case tar.TypeBlock, tar.TypeChar, tar.TypeFifo:
+		mode := uint32(hdr.Mode & 07777)
+		switch hdr.Typeflag {
+		case tar.TypeBlock:
+			mode |= syscall.S_IFBLK
+		case tar.TypeChar:
+			mode |= syscall.S_IFCHR
+		case tar.TypeFifo:
+			mode |= syscall.S_IFIFO
+		}
+
+		if err := syscall.Mknod(path, mode, int(mkdev(hdr.Devmajor, hdr.Devminor))); err != nil {
+			return err
+		}
+
+	case tar.TypeLink:
+		if err := os.Link(filepath.Join(extractDir, hdr.Linkname), path); err != nil {
+			return err
+		}
+
+	case tar.TypeSymlink:
+		if err := os.Symlink(hdr.Linkname, path); err != nil {
+			return err
+		}
+
+	default:
+		return fmt.Errorf("Unhandled tar header type %d\n", hdr.Typeflag)
+	}
+
+	if err := syscall.Lchown(path, hdr.Uid, hdr.Gid); err != nil {
+		return err
+	}
+
+	// There is no LChmod, so ignore mode for symlink. Also, this
+	// must happen after chown, as that can modify the file mode
+	if hdr.Typeflag != tar.TypeSymlink {
+		if err := syscall.Chmod(path, uint32(hdr.Mode&07777)); err != nil {
+			return err
+		}
+	}
+
+	ts := []syscall.Timespec{timeToTimespec(hdr.AccessTime), timeToTimespec(hdr.ModTime)}
+	// syscall.UtimesNano doesn't support a NOFOLLOW flag atm, and
+	if hdr.Typeflag != tar.TypeSymlink {
+		if err := syscall.UtimesNano(path, ts); err != nil {
+			return err
+		}
+	} else {
+		if err := LUtimesNano(path, ts); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Tar creates an archive from the directory at `path`, and returns it as a
@@ -155,7 +274,7 @@ func TarFilter(path string, options *TarOptions) (io.Reader, error) {
 		}
 	}
 
-	return CmdStream(exec.Command(args[0], args[1:]...), &files, func() {
+	return CmdStream(exec.Command(args[0], args[1:]...), bytes.NewBufferString(files), func() {
 		if tmpDir != "" {
 			_ = os.RemoveAll(tmpDir)
 		}
@@ -167,45 +286,92 @@ func TarFilter(path string, options *TarOptions) (io.Reader, error) {
 // The archive may be compressed with one of the following algorithms:
 //  identity (uncompressed), gzip, bzip2, xz.
 // FIXME: specify behavior when target path exists vs. doesn't exist.
-func Untar(archive io.Reader, path string, options *TarOptions) error {
+func Untar(archive io.Reader, dest string, options *TarOptions) error {
 	if archive == nil {
 		return fmt.Errorf("Empty archive")
 	}
 
-	buf := make([]byte, 10)
-	totalN := 0
-	for totalN < 10 {
-		n, err := archive.Read(buf[totalN:])
+	archive, err := DecompressStream(archive)
+	if err != nil {
+		return err
+	}
+
+	tr := tar.NewReader(archive)
+
+	var dirs []*tar.Header
+
+	// Iterate through the files in the archive.
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			// end of tar archive
+			break
+		}
 		if err != nil {
-			if err == io.EOF {
-				return fmt.Errorf("Tarball too short")
-			}
 			return err
 		}
-		totalN += n
-		utils.Debugf("[tar autodetect] n: %d", n)
-	}
 
-	compression := DetectCompression(buf)
+		if options != nil {
+			excludeFile := false
+			for _, exclude := range options.Excludes {
+				if strings.HasPrefix(hdr.Name, exclude) {
+					excludeFile = true
+					break
+				}
+			}
+			if excludeFile {
+				continue
+			}
+		}
 
-	utils.Debugf("Archive compression detected: %s", compression.Extension())
-	args := []string{"--numeric-owner", "-f", "-", "-C", path, "-x" + compression.Flag()}
+		// Normalize name, for safety and for a simple is-root check
+		hdr.Name = filepath.Clean(hdr.Name)
 
-	if options != nil {
-		for _, exclude := range options.Excludes {
-			args = append(args, fmt.Sprintf("--exclude=%s", exclude))
+		if !strings.HasSuffix(hdr.Name, "/") {
+			// Not the root directory, ensure that the parent directory exists
+			parent := filepath.Dir(hdr.Name)
+			parentPath := filepath.Join(dest, parent)
+			if _, err := os.Lstat(parentPath); err != nil && os.IsNotExist(err) {
+				err = os.MkdirAll(parentPath, 600)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		path := filepath.Join(dest, hdr.Name)
+
+		// If path exits we almost always just want to remove and replace it
+		// The only exception is when it is a directory *and* the file from
+		// the layer is also a directory. Then we want to merge them (i.e.
+		// just apply the metadata from the layer).
+		if fi, err := os.Lstat(path); err == nil {
+			if !(fi.IsDir() && hdr.Typeflag == tar.TypeDir) {
+				if err := os.RemoveAll(path); err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := createTarFile(path, dest, hdr, tr); err != nil {
+			return err
+		}
+
+		// Directory mtimes must be handled at the end to avoid further
+		// file creation in them to modify the directory mtime
+		if hdr.Typeflag == tar.TypeDir {
+			dirs = append(dirs, hdr)
 		}
 	}
 
-	cmd := exec.Command("tar", args...)
-	cmd.Stdin = io.MultiReader(bytes.NewReader(buf), archive)
-	// Hardcode locale environment for predictable outcome regardless of host configuration.
-	//   (see https://github.com/dotcloud/docker/issues/355)
-	cmd.Env = []string{"LANG=en_US.utf-8", "LC_ALL=en_US.utf-8"}
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %s", err, output)
+	for _, hdr := range dirs {
+		path := filepath.Join(dest, hdr.Name)
+		ts := []syscall.Timespec{timeToTimespec(hdr.AccessTime), timeToTimespec(hdr.ModTime)}
+		if err := syscall.UtimesNano(path, ts); err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 
@@ -260,7 +426,7 @@ func CopyWithTar(src, dst string) error {
 //
 // If `dst` ends with a trailing slash '/', the final destination path
 // will be `dst/base(src)`.
-func CopyFileWithTar(src, dst string) error {
+func CopyFileWithTar(src, dst string) (err error) {
 	utils.Debugf("CopyFileWithTar(%s, %s)", src, dst)
 	srcSt, err := os.Stat(src)
 	if err != nil {
@@ -277,31 +443,44 @@ func CopyFileWithTar(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil && !os.IsExist(err) {
 		return err
 	}
-	buf := new(bytes.Buffer)
-	tw := tar.NewWriter(buf)
-	hdr, err := tar.FileInfoHeader(srcSt, "")
-	if err != nil {
-		return err
-	}
-	hdr.Name = filepath.Base(dst)
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
-	}
-	srcF, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(tw, srcF); err != nil {
-		return err
-	}
-	tw.Close()
-	return Untar(buf, filepath.Dir(dst), nil)
+
+	r, w := io.Pipe()
+	errC := utils.Go(func() error {
+		defer w.Close()
+
+		srcF, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer srcF.Close()
+
+		tw := tar.NewWriter(w)
+		hdr, err := tar.FileInfoHeader(srcSt, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.Base(dst)
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if _, err := io.Copy(tw, srcF); err != nil {
+			return err
+		}
+		tw.Close()
+		return nil
+	})
+	defer func() {
+		if er := <-errC; err != nil {
+			err = er
+		}
+	}()
+	return Untar(r, filepath.Dir(dst), nil)
 }
 
 // CmdStream executes a command, and returns its stdout as a stream.
 // If the command fails to run or doesn't complete successfully, an error
 // will be returned, including anything written on stderr.
-func CmdStream(cmd *exec.Cmd, input *string, atEnd func()) (io.Reader, error) {
+func CmdStream(cmd *exec.Cmd, input io.Reader, atEnd func()) (io.Reader, error) {
 	if input != nil {
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
@@ -312,7 +491,7 @@ func CmdStream(cmd *exec.Cmd, input *string, atEnd func()) (io.Reader, error) {
 		}
 		// Write stdin if any
 		go func() {
-			_, _ = stdin.Write([]byte(*input))
+			io.Copy(stdin, input)
 			stdin.Close()
 		}()
 	}

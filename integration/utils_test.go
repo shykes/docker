@@ -32,12 +32,12 @@ func mkRuntime(f utils.Fataler) *docker.Runtime {
 	config := &docker.DaemonConfig{
 		Root:        root,
 		AutoRestart: false,
+		Mtu:         docker.DefaultNetworkMtu,
 	}
 	r, err := docker.NewRuntimeFromDirectory(config)
 	if err != nil {
 		f.Fatal(err)
 	}
-	r.UpdateCapabilities(true)
 	return r
 }
 
@@ -46,7 +46,7 @@ func createNamedTestContainer(eng *engine.Engine, config *docker.Config, f utils
 	if err := job.ImportEnv(config); err != nil {
 		f.Fatal(err)
 	}
-	job.StdoutParseString(&shortId)
+	job.Stdout.AddString(&shortId)
 	if err := job.Run(); err != nil {
 		f.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func containerWaitTimeout(eng *engine.Engine, id string, t utils.Fataler) error 
 }
 
 func containerKill(eng *engine.Engine, id string, t utils.Fataler) {
-	if err := getContainer(eng, id, t).Kill(); err != nil {
+	if err := eng.Job("kill", id).Run(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -325,4 +325,23 @@ func fakeTar() (io.Reader, error) {
 	}
 	tw.Close()
 	return buf, nil
+}
+
+func getAllImages(eng *engine.Engine, t *testing.T) *engine.Table {
+	return getImages(eng, t, true, "")
+}
+
+func getImages(eng *engine.Engine, t *testing.T, all bool, filter string) *engine.Table {
+	job := eng.Job("images")
+	job.SetenvBool("all", all)
+	job.Setenv("filter", filter)
+	images, err := job.Stdout.AddListTable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := job.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return images
+
 }

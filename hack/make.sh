@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 # This script builds various binary artifacts from a checkout of the docker
@@ -15,8 +15,9 @@ set -e
 # - The script is intented to be run inside the docker container specified
 #   in the Dockerfile at the root of the source. In other words:
 #   DO NOT CALL THIS SCRIPT DIRECTLY.
-# - The right way to call this script is to invoke "docker build ." from
-#   your checkout of the Docker repository, and then
+# - The right way to call this script is to invoke "make" from
+#   your checkout of the Docker repository. 
+#   the Makefile will do a "docker build -t docker ." and then
 #   "docker run hack/make.sh" in the resulting container image.
 #
 
@@ -28,28 +29,73 @@ RESOLVCONF=$(readlink --canonicalize /etc/resolv.conf)
 grep -q "$RESOLVCONF" /proc/mounts || {
 	echo >&2 "# WARNING! I don't seem to be running in a docker container."
 	echo >&2 "# The result of this command might be an incorrect build, and will not be officially supported."
-	echo >&2 "# Try this: 'docker build -t docker . && docker run docker ./hack/make.sh'"
+	echo >&2 "# Try this: 'make all'"
 }
 
 # List of bundles to create when no argument is passed
 DEFAULT_BUNDLES=(
 	binary
 	test
+	test-integration
 	dynbinary
 	dyntest
+	dyntest-integration
+	cover
+	cross
+	tgz
 	ubuntu
 )
 
 VERSION=$(cat ./VERSION)
-GITCOMMIT=$(git rev-parse --short HEAD)
-if [ -n "$(git status --porcelain)" ]; then
-	GITCOMMIT="$GITCOMMIT-dirty"
+if [ -d .git ] && command -v git &> /dev/null; then
+	GITCOMMIT=$(git rev-parse --short HEAD)
+	if [ -n "$(git status --porcelain)" ]; then
+		GITCOMMIT="$GITCOMMIT-dirty"
+	fi
+elif [ "$DOCKER_GITCOMMIT" ]; then
+	GITCOMMIT="$DOCKER_GITCOMMIT"
+else
+	echo >&2 'error: .git directory missing and DOCKER_GITCOMMIT not specified'
+	echo >&2 '  Please either build with the .git directory accessible, or specify the'
+	echo >&2 '  exact (--short) commit hash you are building using DOCKER_GITCOMMIT for'
+	echo >&2 '  future accountability in diagnosing build issues.  Thanks!'
+	exit 1
 fi
 
 # Use these flags when compiling the tests and final binary
 LDFLAGS='-X main.GITCOMMIT "'$GITCOMMIT'" -X main.VERSION "'$VERSION'" -w'
 LDFLAGS_STATIC='-X github.com/dotcloud/docker/utils.IAMSTATIC true -linkmode external -extldflags "-lpthread -static -Wl,--unresolved-symbols=ignore-in-object-files"'
-BUILDFLAGS='-tags netgo'
+BUILDFLAGS='-tags netgo -a'
+
+HAVE_GO_TEST_COVER=
+if \
+	go help testflag | grep -- -cover > /dev/null \
+	&& go tool -n cover > /dev/null 2>&1 \
+; then
+	HAVE_GO_TEST_COVER=1
+fi
+
+# If $TESTFLAGS is set in the environment, it is passed as extra arguments to 'go test'.
+# You can use this to select certain tests to run, eg.
+#
+#   TESTFLAGS='-run ^TestBuild$' ./hack/make.sh test
+#
+go_test_dir() {
+	dir=$1
+	testcover=()
+	if [ "$HAVE_GO_TEST_COVER" ]; then
+		# if our current go install has -cover, we want to use it :)
+		mkdir -p "$DEST/coverprofiles"
+		coverprofile="docker${dir#.}"
+		coverprofile="$DEST/coverprofiles/${coverprofile//\//-}"
+		testcover=( -cover -coverprofile "$coverprofile" )
+	fi
+	(
+		set -x
+		cd "$dir"
+		go test ${testcover[@]} -ldflags "$LDFLAGS" $BUILDFLAGS $TESTFLAGS
+	)
+}
 
 bundle() {
 	bundlescript=$1

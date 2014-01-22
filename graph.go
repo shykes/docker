@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -56,6 +57,7 @@ func (graph *Graph) restore() error {
 			graph.idIndex.Add(id)
 		}
 	}
+	utils.Debugf("Restored %d elements", len(dir))
 	return nil
 }
 
@@ -85,20 +87,34 @@ func (graph *Graph) Get(name string) (*Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Check that the filesystem layer exists
-	rootfs, err := graph.driver.Get(img.ID)
-	if err != nil {
-		return nil, fmt.Errorf("Driver %s failed to get image rootfs %s: %s", graph.driver, img.ID, err)
-	}
 	if img.ID != id {
 		return nil, fmt.Errorf("Image stored at '%s' has wrong id '%s'", id, img.ID)
 	}
 	img.graph = graph
-	if img.Size == 0 {
-		size, err := utils.TreeSize(rootfs)
+
+	if img.Size < 0 {
+		rootfs, err := graph.driver.Get(img.ID)
 		if err != nil {
-			return nil, fmt.Errorf("Error computing size of rootfs %s: %s", img.ID, err)
+			return nil, fmt.Errorf("Driver %s failed to get image rootfs %s: %s", graph.driver, img.ID, err)
 		}
+
+		var size int64
+		if img.Parent == "" {
+			if size, err = utils.TreeSize(rootfs); err != nil {
+				return nil, err
+			}
+		} else {
+			parentFs, err := graph.driver.Get(img.Parent)
+			if err != nil {
+				return nil, err
+			}
+			changes, err := archive.ChangesDirs(rootfs, parentFs)
+			if err != nil {
+				return nil, err
+			}
+			size = archive.ChangesSize(rootfs, changes)
+		}
+
 		img.Size = size
 		if err := img.SaveSize(graph.imageRoot(id)); err != nil {
 			return nil, err
@@ -112,11 +128,12 @@ func (graph *Graph) Create(layerData archive.Archive, container *Container, comm
 	img := &Image{
 		ID:            GenerateID(),
 		Comment:       comment,
-		Created:       time.Now(),
+		Created:       time.Now().UTC(),
 		DockerVersion: VERSION,
 		Author:        author,
 		Config:        config,
-		Architecture:  "x86_64",
+		Architecture:  runtime.GOARCH,
+		OS:            runtime.GOOS,
 	}
 	if container != nil {
 		img.Parent = container.Image
@@ -131,7 +148,15 @@ func (graph *Graph) Create(layerData archive.Archive, container *Container, comm
 
 // Register imports a pre-existing image into the graph.
 // FIXME: pass img as first argument
-func (graph *Graph) Register(jsonData []byte, layerData archive.Archive, img *Image) error {
+func (graph *Graph) Register(jsonData []byte, layerData archive.Archive, img *Image) (err error) {
+	defer func() {
+		// If any error occurs, remove the new dir from the driver.
+		// Don't check for errors since the dir might not have been created.
+		// FIXME: this leaves a possible race condition.
+		if err != nil {
+			graph.driver.Remove(img.ID)
+		}
+	}()
 	if err := ValidateID(img.ID); err != nil {
 		return err
 	}
@@ -146,6 +171,12 @@ func (graph *Graph) Register(jsonData []byte, layerData archive.Archive, img *Im
 	if err := os.RemoveAll(graph.imageRoot(img.ID)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+
+	// If the driver has this ID but the graph doesn't, remove it from the driver to start fresh.
+	// (the graph is the source of truth).
+	// Ignore errors, since we don't know if the driver correctly returns ErrNotExist.
+	// (FIXME: make that mandatory for drivers).
+	graph.driver.Remove(img.ID)
 
 	tmp, err := graph.Mktemp("")
 	defer os.RemoveAll(tmp)
@@ -191,7 +222,7 @@ func (graph *Graph) TempLayerArchive(id string, compression archive.Compression,
 	if err != nil {
 		return nil, err
 	}
-	return archive.NewTempArchive(utils.ProgressReader(ioutil.NopCloser(a), 0, output, sf.FormatProgress("", "Buffering to disk", "%v/%v (%v)"), sf, true), tmp)
+	return archive.NewTempArchive(utils.ProgressReader(ioutil.NopCloser(a), 0, output, sf, false, utils.TruncateID(id), "Buffering to disk"), tmp)
 }
 
 // Mktemp creates a temporary sub-directory inside the graph's filesystem.
@@ -362,4 +393,8 @@ func (graph *Graph) Heads() (map[string]*Image, error) {
 
 func (graph *Graph) imageRoot(id string) string {
 	return path.Join(graph.Root, id)
+}
+
+func (graph *Graph) Driver() graphdriver.Driver {
+	return graph.driver
 }

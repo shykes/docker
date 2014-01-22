@@ -51,14 +51,17 @@ func cleanup(eng *engine.Engine, t *testing.T) error {
 		container.Kill()
 		runtime.Destroy(container)
 	}
-	srv := mkServerFromEngine(eng, t)
-	images, err := srv.Images(true, "")
+	job := eng.Job("images")
+	images, err := job.Stdout.AddTable()
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	for _, image := range images {
-		if image.ID != unitTestImageID {
-			srv.ImageDelete(image.ID, false)
+	if err := job.Run(); err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range images.Data {
+		if image.Get("ID") != unitTestImageID {
+			mkServerFromEngine(eng, t).ImageDelete(image.Get("ID"), false)
 		}
 	}
 	return nil
@@ -74,6 +77,9 @@ func layerArchive(tarfile string) (io.Reader, error) {
 }
 
 func init() {
+	// Always use the same driver (vfs) for all integration tests.
+	// To test other drivers, we need a dedicated driver validation suite.
+	os.Setenv("DOCKER_DRIVER", "vfs")
 	os.Setenv("TEST", "1")
 
 	// Hack to run sys init during unit testing
@@ -124,7 +130,7 @@ func setupBaseImage() {
 	job.SetenvBool("Autorestart", false)
 	job.Setenv("BridgeIface", unitTestNetworkBridge)
 	if err := job.Run(); err != nil {
-		log.Fatalf("Unable to create a runtime for tests:", err)
+		log.Fatalf("Unable to create a runtime for tests: %s", err)
 	}
 	srv := mkServerFromEngine(eng, log.New(os.Stderr, "", 0))
 
@@ -155,7 +161,7 @@ func spawnGlobalDaemon() {
 			Host:   testDaemonAddr,
 		}
 		job := eng.Job("serveapi", listenURL.String())
-		job.SetenvBool("Logging", os.Getenv("DEBUG") != "")
+		job.SetenvBool("Logging", true)
 		if err := job.Run(); err != nil {
 			log.Fatalf("Unable to spawn the test daemon: %s", err)
 		}
@@ -170,7 +176,7 @@ func spawnGlobalDaemon() {
 func GetTestImage(runtime *docker.Runtime) *docker.Image {
 	imgs, err := runtime.Graph().Map()
 	if err != nil {
-		log.Fatalf("Unable to get the test image:", err)
+		log.Fatalf("Unable to get the test image: %s", err)
 	}
 	for _, image := range imgs {
 		if image.ID == unitTestImageID {
@@ -387,7 +393,7 @@ func startEchoServerContainer(t *testing.T, proto string) (*docker.Runtime, *doc
 		jobCreate.SetenvList("Cmd", []string{"sh", "-c", cmd})
 		jobCreate.SetenvList("PortSpecs", []string{fmt.Sprintf("%s/%s", strPort, proto)})
 		jobCreate.SetenvJson("ExposedPorts", ep)
-		jobCreate.StdoutParseString(&id)
+		jobCreate.Stdout.AddString(&id)
 		if err := jobCreate.Run(); err != nil {
 			t.Fatal(err)
 		}
@@ -745,6 +751,54 @@ func TestRandomContainerName(t *testing.T) {
 	}
 }
 
+func TestContainerNameValidation(t *testing.T) {
+	eng := NewTestEngine(t)
+	runtime := mkRuntimeFromEngine(eng, t)
+	defer nuke(runtime)
+
+	for _, test := range []struct {
+		Name  string
+		Valid bool
+	}{
+		{"abc-123_AAA.1", true},
+		{"\000asdf", false},
+	} {
+		config, _, _, err := docker.ParseRun([]string{unitTestImageID, "echo test"}, nil)
+		if err != nil {
+			if !test.Valid {
+				continue
+			}
+			t.Fatal(err)
+		}
+
+		var shortID string
+		job := eng.Job("create", test.Name)
+		if err := job.ImportEnv(config); err != nil {
+			t.Fatal(err)
+		}
+		job.Stdout.AddString(&shortID)
+		if err := job.Run(); err != nil {
+			if !test.Valid {
+				continue
+			}
+			t.Fatal(err)
+		}
+
+		container := runtime.Get(shortID)
+
+		if container.Name != "/"+test.Name {
+			t.Fatalf("Expect /%s got %s", test.Name, container.Name)
+		}
+
+		if c := runtime.Get("/" + test.Name); c == nil {
+			t.Fatalf("Couldn't retrieve test container as /%s", test.Name)
+		} else if c.ID != container.ID {
+			t.Fatalf("Container /%s has ID %s instead of %s", test.Name, c.ID, container.ID)
+		}
+	}
+
+}
+
 func TestLinkChildContainer(t *testing.T) {
 	eng := NewTestEngine(t)
 	runtime := mkRuntimeFromEngine(eng, t)
@@ -838,5 +892,45 @@ func TestGetAllChildren(t *testing.T) {
 		if value.ID != childContainer.ID {
 			t.Fatalf("Expected id %s got %s", childContainer.ID, value.ID)
 		}
+	}
+}
+
+func TestDestroyWithInitLayer(t *testing.T) {
+	runtime := mkRuntime(t)
+	defer nuke(runtime)
+
+	container, _, err := runtime.Create(&docker.Config{
+		Image: GetTestImage(runtime).ID,
+		Cmd:   []string{"ls", "-al"},
+	}, "")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Destroy
+	if err := runtime.Destroy(container); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make sure runtime.Exists() behaves correctly
+	if runtime.Exists("test_destroy") {
+		t.Fatalf("Exists() returned true")
+	}
+
+	// Make sure runtime.List() doesn't list the destroyed container
+	if len(runtime.List()) != 0 {
+		t.Fatalf("Expected 0 container, %v found", len(runtime.List()))
+	}
+
+	driver := runtime.Graph().Driver()
+
+	// Make sure that the container does not exist in the driver
+	if _, err := driver.Get(container.ID); err == nil {
+		t.Fatal("Conttainer should not exist in the driver")
+	}
+
+	// Make sure that the init layer is removed from the driver
+	if _, err := driver.Get(fmt.Sprintf("%s-init", container.ID)); err == nil {
+		t.Fatal("Container's init layer should not exist in the driver")
 	}
 }
