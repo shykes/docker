@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0 (2014-01-04)
+
+#### Notable features since 0.7.0
+
+* Reference counted mounts for storage drivers for start and stops of the daemon
+* Adding experimental BTRFS support as a storage driver
+* Security fixes to the docker build sandbox to prevent symlinks from escaping  
+* Faster docker build performance by disabling compression 
+* Add caching for docker build 
+* Performance improvements for many container and image operations
+* Memory usage has drastically decreased for build and add operations
+* Client support for OSX, ARM, and 32bit linux
+* Add systemd socket activation
+* Add new build instruction ONBUILD
+
 ## 0.7.6 (2014-01-14)
 
 #### Builder
