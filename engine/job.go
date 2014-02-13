@@ -83,6 +83,11 @@ func (job *Job) CallString() string {
 	return fmt.Sprintf("%s(%s)", job.Name, strings.Join(job.Args, ", "))
 }
 
+// Status returns the job status
+func (job *Job) Status() Status {
+	return job.status
+}
+
 func (job *Job) StatusString() string {
 	// If the job hasn't completed, status string is empty
 	if job.end.IsZero() {

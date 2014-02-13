@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
+	"io/ioutil"
 	"os"
 	"strings"
 
+	// Load builtins
+	_ "github.com/dotcloud/docker/builtins/daemon"
+	_ "github.com/dotcloud/docker/builtins/rest"
 	"github.com/dotcloud/docker/api"
 	"github.com/dotcloud/docker/dockerversion"
 	"github.com/dotcloud/docker/engine"
@@ -23,100 +28,81 @@ func main() {
 	}
 
 	var (
-		flVersion            = flag.Bool([]string{"v", "-version"}, false, "Print version information and quit")
-		flDaemon             = flag.Bool([]string{"d", "-daemon"}, false, "Enable daemon mode")
-		flDebug              = flag.Bool([]string{"D", "-debug"}, false, "Enable debug mode")
-		flAutoRestart        = flag.Bool([]string{"r", "-restart"}, true, "Restart previously running containers")
-		bridgeName           = flag.String([]string{"b", "-bridge"}, "", "Attach containers to a pre-existing network bridge; use 'none' to disable container networking")
-		bridgeIp             = flag.String([]string{"#bip", "-bip"}, "", "Use this CIDR notation address for the network bridge's IP, not compatible with -b")
-		pidfile              = flag.String([]string{"p", "-pidfile"}, "/var/run/docker.pid", "Path to use for daemon PID file")
-		flRoot               = flag.String([]string{"g", "-graph"}, "/var/lib/docker", "Path to use as the root of the docker runtime")
-		flEnableCors         = flag.Bool([]string{"#api-enable-cors", "-api-enable-cors"}, false, "Enable CORS headers in the remote API")
-		flDns                = opts.NewListOpts(opts.ValidateIp4Address)
-		flEnableIptables     = flag.Bool([]string{"#iptables", "-iptables"}, true, "Disable docker's addition of iptables rules")
-		flEnableIpForward    = flag.Bool([]string{"#ip-forward", "-ip-forward"}, true, "Disable enabling of net.ipv4.ip_forward")
-		flDefaultIp          = flag.String([]string{"#ip", "-ip"}, "0.0.0.0", "Default IP address to use when binding container ports")
-		flInterContainerComm = flag.Bool([]string{"#icc", "-icc"}, true, "Enable inter-container communication")
-		flGraphDriver        = flag.String([]string{"s", "-storage-driver"}, "", "Force the docker runtime to use a specific storage driver")
-		flHosts              = opts.NewListOpts(api.ValidateHost)
-		flMtu                = flag.Int([]string{"#mtu", "-mtu"}, 0, "Set the containers network MTU; if no value is provided: default to the default route MTU or 1500 if not default route is available")
+		flVersion	= flag.Bool([]string{"v", "-version"}, false, "Print version information and quit")
+		flDebug		= flag.Bool([]string{"D", "-debug"}, false, "Enable debug mode")
+		flPlugins	= opts.NewListOpts(nil)
 	)
-	flag.Var(&flDns, []string{"#dns", "-dns"}, "Force docker to use specific DNS servers")
-	flag.Var(&flHosts, []string{"H", "-host"}, "tcp://host:port, unix://path/to/socket, fd://* or fd://socketfd to use in daemon mode. Multiple sockets can be specified")
 
+	flag.Var(&flPlugins, []string{"-plugin"}, "PLUGIN [ARG...]")
 	flag.Parse()
 
 	if *flVersion {
 		showVersion()
 		return
 	}
-	if flHosts.Len() == 0 {
-		defaultHost := os.Getenv("DOCKER_HOST")
-
-		if defaultHost == "" || *flDaemon {
-			// If we do not have a host, default to unix socket
-			defaultHost = fmt.Sprintf("unix://%s", api.DEFAULTUNIXSOCKET)
-		}
-		flHosts.Set(defaultHost)
-	}
-
-	if *bridgeName != "" && *bridgeIp != "" {
-		log.Fatal("You specified -b & --bip, mutually exclusive options. Please specify only one.")
-	}
 
 	if *flDebug {
 		os.Setenv("DEBUG", "1")
 	}
-	if *flDaemon {
-		if flag.NArg() != 0 {
-			flag.Usage()
-			return
+	args := parseLegacy(&flPlugins, flag.Args()...)
+	eng, err := engine.New(".docker")
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Load plugins
+	for _, pluginCmd := range flPlugins.GetAll() {
+		// FIXME: use a full-featured command parser
+		scanner := bufio.NewScanner(strings.NewReader(pluginCmd))
+		scanner.Split(bufio.ScanWords)
+		var cmd []string
+		for scanner.Scan() {
+			cmd = append(cmd, scanner.Text())
 		}
-
-		eng, err := engine.New(*flRoot)
-		if err != nil {
-			log.Fatal(err)
+		if len(cmd) < 1 {
+			log.Fatalf("empty plugin definition: '%s'", pluginCmd)
 		}
-		// Load plugin: httpapi
-		job := eng.Job("initserver")
-		job.Setenv("Pidfile", *pidfile)
-		job.Setenv("Root", *flRoot)
-		job.SetenvBool("AutoRestart", *flAutoRestart)
-		job.SetenvList("Dns", flDns.GetAll())
-		job.SetenvBool("EnableIptables", *flEnableIptables)
-		job.SetenvBool("EnableIpForward", *flEnableIpForward)
-		job.Setenv("BridgeIface", *bridgeName)
-		job.Setenv("BridgeIP", *bridgeIp)
-		job.Setenv("DefaultIp", *flDefaultIp)
-		job.SetenvBool("InterContainerCommunication", *flInterContainerComm)
-		job.Setenv("GraphDriver", *flGraphDriver)
-		job.SetenvInt("Mtu", *flMtu)
-		if err := job.Run(); err != nil {
-			log.Fatal(err)
-		}
-		// Serve api
-		job = eng.Job("serveapi", flHosts.GetAll()...)
-		job.SetenvBool("Logging", true)
-		job.SetenvBool("EnableCors", *flEnableCors)
-		job.Setenv("Version", dockerversion.VERSION)
-		if err := job.Run(); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		if flHosts.Len() > 1 {
-			log.Fatal("Please specify only one -H")
-		}
-		protoAddrParts := strings.SplitN(flHosts.GetAll()[0], "://", 2)
-		if err := api.ParseCommands(protoAddrParts[0], protoAddrParts[1], flag.Args()...); err != nil {
-			if sterr, ok := err.(*utils.StatusError); ok {
-				if sterr.Status != "" {
-					log.Println(sterr.Status)
-				}
-				os.Exit(sterr.StatusCode)
-			}
-			log.Fatal(err)
+		fmt.Printf("---> loading plugin '%s'\n", pluginCmd)
+		if err := eng.Job(cmd[0], cmd[1:]...).Run(); err != nil {
+			log.Fatalf("error loading plugin '%s': %s\n", pluginCmd, err)
 		}
 	}
+	// Pass arguments as a new job
+	job := eng.Job(args[0], args[1:]...)
+	if err := job.Run(); err != nil {
+		os.Exit(int(job.Status()))
+	}
+}
+
+
+func parseLegacy(plugins *opts.ListOpts, argsIn ...string) (argsOut []string) {
+	cmd := flag.NewFlagSet("extract-legacy-plugins", flag.ContinueOnError)
+	cmd.SetOutput(ioutil.Discard)
+	flDaemon := cmd.Bool([]string{"d", "-daemon"}, false, "Enable daemon mode")
+	flHosts := opts.NewListOpts(api.ValidateHost)
+	cmd.Var(&flHosts, []string{"-H", "-host"}, "")
+	cmd.Parse(argsIn)
+	argsOut = cmd.Args()
+	if *flDaemon {
+		// '-d' means 1) load daemon plugin and 2) call serveapi
+		// plugin 'daemon' configures docker to run lxc containers itself
+		plugins.Set("daemon")
+		argsOut = []string{"serveapi"}
+		for _, host := range flHosts.GetAll() {
+			argsOut = append(argsOut, "-H", host)
+		}
+	} else if plugins.Len() == 0 {
+		// no '-d' means 1) load client plugin and pass on the command unchanged
+		// plugin 'client' configures docker to forward all commands
+		// over a remote rest api
+		var host string
+		if flHosts.Len() > 0 {
+			host = flHosts.GetAll()[0]
+		} else {
+			host = os.Getenv("DOCKER_HOST")
+		}
+		plugins.Set("client " + host)
+	}
+	return argsOut
 }
 
 func showVersion() {
