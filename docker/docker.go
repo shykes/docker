@@ -86,7 +86,8 @@ func parseLegacy(plugins *opts.ListOpts, argsIn ...string) (argsOut []string) {
 		// '-d' means 1) load daemon plugin and 2) call serveapi
 		// plugin 'daemon' configures docker to run lxc containers itself
 		plugins.Set("daemon")
-		argsOut = []string{"serveapi"}
+		plugins.Set("rest")
+		argsOut = []string{"restserver"}
 		for _, host := range flHosts.GetAll() {
 			argsOut = append(argsOut, "-H", host)
 		}
