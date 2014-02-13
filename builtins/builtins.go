@@ -10,7 +10,8 @@ import (
 
 func Register(eng *engine.Engine) {
 	rest(eng)
-
+	bridge(eng)
+	daemon(eng)
 }
 
 // rest: a RESTful api for cross-docker communication
