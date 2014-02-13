@@ -8,10 +8,8 @@ import (
 	"os"
 	"strings"
 
-	// Load builtins
-	_ "github.com/dotcloud/docker/builtins/daemon"
-	_ "github.com/dotcloud/docker/builtins/rest"
 	"github.com/dotcloud/docker/api"
+	"github.com/dotcloud/docker/builtins"
 	"github.com/dotcloud/docker/dockerversion"
 	"github.com/dotcloud/docker/engine"
 	flag "github.com/dotcloud/docker/pkg/mflag"
@@ -49,6 +47,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// Register builtins
+	builtins.Register(eng)
 	// Load plugins
 	for _, pluginCmd := range flPlugins.GetAll() {
 		// FIXME: use a full-featured command parser
