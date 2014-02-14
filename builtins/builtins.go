@@ -18,6 +18,7 @@ func Register(eng *engine.Engine) {
 func rest(eng *engine.Engine) {
 	eng.Register("rest", func(job *engine.Job) engine.Status {
 		job.Eng.Register("restserver", rest_.ServeApi)
+		job.Eng.Register("restclient", rest_.ConnectApi)
 		// FIXME: register "restclient"
 		return engine.StatusOK
 	})
