@@ -83,11 +83,11 @@ func parseLegacy(plugins *opts.ListOpts, argsIn ...string) (argsOut []string) {
 	cmd.SetOutput(ioutil.Discard)
 	flDaemon := cmd.Bool([]string{"d", "-daemon"}, false, "Enable daemon mode")
 	flHosts := opts.NewListOpts(api.ValidateHost)
-	cmd.Var(&flHosts, []string{"-H", "-host"}, "")
+	cmd.Var(&flHosts, []string{"H", "-host"}, "")
 	cmd.Parse(argsIn)
 	argsOut = cmd.Args()
 	if *flDaemon {
-		// '-d' means 1) load daemon plugin and 2) call serveapi
+		// '-d' means 1) load daemon and rest plugins and 2) call restserver
 		// plugin 'daemon' configures docker to run lxc containers itself
 		plugins.Set("daemon")
 		plugins.Set("rest")
