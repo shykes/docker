@@ -43,6 +43,10 @@ func main() {
 		os.Setenv("DEBUG", "1")
 	}
 	args := parseLegacy(&flPlugins, flag.Args()...)
+	if len(args) == 0 {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
 	eng, err := engine.New(".docker")
 	if err != nil {
 		log.Fatal(err)
