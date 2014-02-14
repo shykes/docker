@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"log"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -25,26 +24,18 @@ func main() {
 		return
 	}
 
-	var (
-		flVersion	= flag.Bool([]string{"v", "-version"}, false, "Print version information and quit")
-		flDebug		= flag.Bool([]string{"D", "-debug"}, false, "Enable debug mode")
-		flPlugins	= opts.NewListOpts(nil)
-	)
-
-	flag.Var(&flPlugins, []string{"-plugin"}, "PLUGIN [ARG...]")
-	flag.Parse()
-
-	if *flVersion {
+	var opts Opts
+	opts.Parse()
+	if opts.Version {
 		showVersion()
 		return
 	}
-
-	if *flDebug {
+	if opts.Debug {
 		os.Setenv("DEBUG", "1")
 	}
-	args := parseLegacy(&flPlugins, flag.Args()...)
-	if len(args) == 0 {
-		flag.PrintDefaults()
+
+	if len(opts.Args) == 0 {
+		flag.Usage()
 		os.Exit(1)
 	}
 	eng, err := engine.New(".docker")
@@ -54,7 +45,7 @@ func main() {
 	// Register builtins
 	builtins.Register(eng)
 	// Load plugins
-	for _, pluginCmd := range flPlugins.GetAll() {
+	for _, pluginCmd := range opts.Plugins.GetAll() {
 		// FIXME: use a full-featured command parser
 		scanner := bufio.NewScanner(strings.NewReader(pluginCmd))
 		scanner.Split(bufio.ScanWords)
@@ -71,45 +62,69 @@ func main() {
 		}
 	}
 	// Pass arguments as a new job
-	job := eng.Job(args[0], args[1:]...)
+	job := eng.Job(opts.Args[0], opts.Args[1:]...)
 	if err := job.Run(); err != nil {
 		os.Exit(int(job.Status()))
 	}
 }
 
 
-func parseLegacy(plugins *opts.ListOpts, argsIn ...string) (argsOut []string) {
-	cmd := flag.NewFlagSet("extract-legacy-plugins", flag.ContinueOnError)
-	cmd.SetOutput(ioutil.Discard)
-	flDaemon := cmd.Bool([]string{"d", "-daemon"}, false, "Enable daemon mode")
-	flHosts := opts.NewListOpts(api.ValidateHost)
-	cmd.Var(&flHosts, []string{"H", "-host"}, "")
-	cmd.Parse(argsIn)
-	argsOut = cmd.Args()
-	if *flDaemon {
+func showVersion() {
+	fmt.Printf("Docker version %s, build %s\n", dockerversion.VERSION, dockerversion.GITCOMMIT)
+}
+
+type Opts struct {
+	Version	bool
+	Debug	bool
+	Plugins	opts.ListOpts
+	Args	[]string
+}
+
+type LegacyOpts struct {
+	Daemon	bool
+	Hosts	opts.ListOpts
+}
+
+func (o *Opts) Parse() {
+	// Register supported flags
+	flag.BoolVar(&o.Version, []string{"v", "-version"}, false, "Print version information and quit")
+	flag.BoolVar(&o.Debug, []string{"D", "-debug"}, false, "Enable debug mode")
+	flag.Var(&o.Plugins, []string{"-load"}, "Load a plugin")
+	flag.Lookup("-load").DefValue = "'COMMAND [ARG...]'"
+	// Register legacy flags
+	// FIXME: legacy flags should be hidden from the usage message
+	legacy := LegacyOpts{
+		Hosts:	opts.NewListOpts(api.ValidateHost),
+	}
+	flag.BoolVar(&legacy.Daemon, []string{"d", "-daemon"}, false, "(deprecated) enable daemon mode")
+	flag.Var(&legacy.Hosts, []string{"H", "-host"}, "(deprecated) listen or connect to a remote daemon")
+	flag.Lookup("-host").DefValue = "'tcp://HOST[:PORT] | unix://PATH'"
+	// First-pass
+	flag.Parse()
+	args := flag.Args()
+	// -d -> legacy daemon mode
+	if legacy.Daemon {
 		// '-d' means 1) load daemon and rest plugins and 2) call restserver
 		// plugin 'daemon' configures docker to run lxc containers itself
-		plugins.Set("daemon")
-		plugins.Set("rest")
-		argsOut = []string{"restserver"}
-		for _, host := range flHosts.GetAll() {
-			argsOut = append(argsOut, "-H", host)
+		o.Plugins.Set("daemon")
+		o.Plugins.Set("rest")
+		args = []string{"restserver"}
+		for _, host := range legacy.Hosts.GetAll() {
+			args = append(args, "-H", host)
 		}
-	} else if plugins.Len() == 0 {
+	// No -d + no plugins -> legacy client mode
+	} else if o.Plugins.Len() == 0 {
 		// no '-d' means 1) load client plugin and pass on the command unchanged
 		// plugin 'client' configures docker to forward all commands
 		// over a remote rest api
 		var host string
-		if flHosts.Len() > 0 {
-			host = flHosts.GetAll()[0]
+		if legacy.Hosts.Len() > 0 {
+			host = legacy.Hosts.GetAll()[0]
 		} else {
 			host = os.Getenv("DOCKER_HOST")
 		}
-		plugins.Set("restclient " + host)
+		o.Plugins.Set("rest")
+		o.Plugins.Set("restclient " + host)
 	}
-	return argsOut
-}
-
-func showVersion() {
-	fmt.Printf("Docker version %s, build %s\n", dockerversion.VERSION, dockerversion.GITCOMMIT)
+	o.Args = args
 }
