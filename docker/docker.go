@@ -105,7 +105,7 @@ func parseLegacy(plugins *opts.ListOpts, argsIn ...string) (argsOut []string) {
 		} else {
 			host = os.Getenv("DOCKER_HOST")
 		}
-		plugins.Set("client " + host)
+		plugins.Set("restclient " + host)
 	}
 	return argsOut
 }
