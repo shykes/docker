@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -106,6 +107,17 @@ func New(root string) (*Engine, error) {
 		Stderr:   os.Stderr,
 		Stdin:    os.Stdin,
 	}
+	eng.Register("commands", func(job *Job) Status {
+		names := make([]string, 0, len(eng.handlers))
+		for name := range eng.handlers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			job.Printf("%s\n", name)
+		}
+		return StatusOK
+	})
 	// Copy existing global handlers
 	for k, v := range globalHandlers {
 		eng.handlers[k] = v
