@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/dotcloud/docker/api"
 	"github.com/dotcloud/docker/builtins"
@@ -33,38 +31,34 @@ func main() {
 	if opts.Debug {
 		os.Setenv("DEBUG", "1")
 	}
-
-	if len(opts.Args) == 0 {
-		flag.Usage()
-		os.Exit(1)
-	}
 	eng, err := engine.New(".docker")
 	if err != nil {
 		log.Fatal(err)
 	}
+	// Disable default logging
+	eng.Logging = false
 	// Register builtins
 	builtins.Register(eng)
 	// Load plugins
 	for _, pluginCmd := range opts.Plugins.GetAll() {
-		// FIXME: use a full-featured command parser
-		scanner := bufio.NewScanner(strings.NewReader(pluginCmd))
-		scanner.Split(bufio.ScanWords)
-		var cmd []string
-		for scanner.Scan() {
-			cmd = append(cmd, scanner.Text())
+		plugin, err := eng.ParseJob(pluginCmd)
+		if err != nil {
+			log.Fatalf("can't load plugin: %s", err)
 		}
-		if len(cmd) < 1 {
-			log.Fatalf("empty plugin definition: '%s'", pluginCmd)
-		}
-		fmt.Printf("---> loading plugin '%s'\n", pluginCmd)
-		if err := eng.Job(cmd[0], cmd[1:]...).Run(); err != nil {
-			log.Fatalf("error loading plugin '%s': %s\n", pluginCmd, err)
+		log.Printf("---> loading plugin '%s'\n", pluginCmd)
+		if err := plugin.Run(); err != nil {
+			log.Fatalf("error loading plugin %s: %s", plugin.Name, err)
 		}
 	}
-	// Pass arguments as a new job
-	job := eng.Job(opts.Args[0], opts.Args[1:]...)
-	if err := job.Run(); err != nil {
-		os.Exit(int(job.Status()))
+	if len(opts.Args) > 0 {
+		// Pass arguments as a new job
+		job := eng.Job(opts.Args[0], opts.Args[1:]...)
+		job.Stdout.Add(os.Stdout)
+		job.Stderr.Add(os.Stderr)
+		job.Stdin.Add(os.Stdin)
+		if err := job.Run(); err != nil {
+			os.Exit(int(job.Status()))
+		}
 	}
 }
 
