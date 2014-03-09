@@ -7,9 +7,35 @@ import (
 	"os"
 )
 
+
+
+func Send(conn *net.UnixConn, data []byte, f *os.File) error {
+	return send(conn, data, int(f.Fd()))
+}
+
 func send(conn *net.UnixConn, data []byte, fds ...int) error {
 	_, _, err := conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
 	return err
+}
+
+func Receive(conn *net.UnixConn) ([]byte, *os.File, error) {
+	for {
+		data, fds, err := receive(conn)
+		if err != nil {
+			return nil, nil, fmt.Errorf("receive: %v", err)
+		}
+		if len(fds) == 0 {
+			continue
+		}
+		if len(fds) > 1 {
+			for _, fd := range fds {
+				syscall.Close(fd)
+			}
+		}
+		return data, os.NewFile(uintptr(fds[0]), ""), nil
+	}
+	panic("impossibru")
+	return nil, nil, nil
 }
 
 func receive(conn *net.UnixConn) ([]byte, []int, error) {

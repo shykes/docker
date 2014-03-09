@@ -88,7 +88,11 @@ func main() {
 		fmt.Printf("// 3. Serve callbacks from worker\n")
 		go func() {
 			defer wg.Done()
-			chord.NewServerSession(childHandle).Serve(func(data []byte, conn *net.UnixConn) {
+			srv, err := chord.NewServerSession(childHandle)
+			if err != nil {
+				return
+			}
+			srv.Serve(func(data []byte, conn *net.UnixConn) {
 				fmt.Printf("worker [%s] calling back for [%s]\n", os.Args[1], string(data))
 			})
 		}()
@@ -103,7 +107,10 @@ func worker() error {
 		return err
 	}
 	conn := c.Conn()
-	srv := chord.NewServerSession(conn)
+	srv, err := chord.NewServerSession(conn)
+	if err != nil {
+		return err
+	}
 	Logf("Waiting for job requests on %v\n", conn)
 	srv.ServeSimple(func(data string, out chan *os.File) {
 		cmd := strings.Split(data, " ")

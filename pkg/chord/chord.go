@@ -6,22 +6,19 @@ import (
 	"os"
 	"syscall"
 	"io"
-	"strconv"
+)
+
+const (
+	DefaultServerFd = 3
+	DefaultClientFd = 4
 )
 
 func NewClient(conn *net.UnixConn) (*Client, error) {
 	if conn == nil {
-		val := os.Getenv("CHORD")
-		if val == "" {
-			return nil, fmt.Errorf("environment variable $CHORD is not set")
-		}
-		fd, err := strconv.ParseInt(val, 0, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid environment variable $CHORD=%v: not an integer", val)
-		}
-		conn, err = fdconn(int(fd))
-		if err != nil {
-			return nil, fmt.Errorf("invalid environment variable $CHORD=%v: not a valid unix socket fd", val)
+		if c, err := fdconn(DefaultClientFd); err != nil {
+			return nil, fmt.Errorf("fd %v is not a valid unix socket", DefaultClientFd)
+		} else {
+			conn = c
 		}
 	}
 	return &Client{conn}, nil
