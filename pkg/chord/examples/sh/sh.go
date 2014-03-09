@@ -10,16 +10,52 @@ import (
 	"os/exec"
 	"path"
 	"sync"
+	"bufio"
 	"strings"
 	"io"
 )
 
-func CmdEcho(cmd []string, in *chord.ServerSession, out *chord.Client) error {
+var commands = map[string]func([]string, *net.UnixConn, *net.UnixConn)error {
+	"echo": CmdEcho,
+	"dump": CmdDump,
+	"listen": CmdListen,
+}
+
+
+func CmdEcho(cmd []string, in *net.UnixConn, out *net.UnixConn) error {
 	fmt.Printf("%s\n", strings.Join(cmd[1:], " "))
 	return nil
 }
 
-func CmdListen(cmd []string, in *chord.ServerSession, out *chord.Client) error {
+func CmdDump(cmd []string, in *net.UnixConn, out *net.UnixConn) error {
+	prefix := strings.Join(cmd[1:], " ")
+	var wg sync.WaitGroup
+	for {
+		msg, f, err := chord.Receive(in)
+		if err != nil {
+			return err
+		}
+		wg.Add(1)
+		go func(src io.Reader) {
+			defer wg.Done()
+			input := bufio.NewScanner(f)
+			for input.Scan() {
+				line := input.Text()
+				if len(line) > 0 {
+					fmt.Printf("%s [%s] %s\n", prefix, msg, line)
+				}
+				if err := input.Err(); err != nil {
+					fmt.Printf("%s [%s:%s]\n", prefix, msg, err)
+					break
+				}
+			}
+		}(f)
+	}
+	wg.Wait()
+	return nil
+}
+
+func CmdListen(cmd []string, in *net.UnixConn, out *net.UnixConn) error {
 	Logf("CmdListen\n")
 	addr, err := url.Parse(cmd[1])
 	if err != nil {
@@ -50,7 +86,7 @@ func CmdListen(cmd []string, in *chord.ServerSession, out *chord.Client) error {
 			conn.Close()
 			continue
 		}
-		if err := chord.Send(out.Conn(), []byte("conn"), f); err != nil {
+		if err := chord.Send(out, []byte("conn"), f); err != nil {
 			return err
 		}
 	}
@@ -89,65 +125,79 @@ func main() {
 }
 
 func doShell() error {
-	if len(os.Args) == 1 {
-		return fmt.Errorf("usage: %s COMMAND [ARGS]", os.Args[0])
-	}
-	cmd := Command(utils.SelfPath(), os.Args[1:]...)
-	cmd.Args = cmd.Args[1:]
-	Logf("preparing command '%s'", cmd.Args[0])
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	childOut, err := cmd.OutPipe()
-	if err != nil {
-		return err
-	}
-	childIn, err := cmd.InPipe()
-	if err != nil {
-		return err
-	}
-	var wg sync.WaitGroup
-	wg.Add(1)
+	commands := make(chan []string)
 	go func() {
-		defer Logf("done listening for output messages from '%s'", cmd.Args[0])
-		defer wg.Done()
-		for {
-			Logf("listening for output messages from '%s'", cmd.Args[0])
-			data, conn, err := chord.Receive(childOut)
-			Logf("---> from [%v]: '%s' (err=%v)", cmd.Args[0], data, err)
-			if err != nil {
-				return
+		defer close(commands)
+		if len(os.Args) > 1 {
+			// Batch mode
+			commands <- os.Args[1:]
+			return
+		}
+		// Interactive mode
+		input := bufio.NewScanner(os.Stdin)
+		for input.Scan() {
+			line := input.Text()
+			words := strings.Split(line, " ")
+			if len(words) > 0 {
+				commands <- words
 			}
-			Logf("out from [%s]: '%s'\n", cmd.Args[0], data)
-			if conn != nil {
-				io.Copy(os.Stdout, conn)
-				conn.Close()
+			if input.Err() != nil {
+				return
 			}
 		}
 	}()
-	Logf("Running child path=%v args=%v", cmd.Path, cmd.Args)
-	err = cmd.Run()
-	Logf("Child returned: err=%v", err)
-	childOut.Close()
-	childIn.Close()
-	Logf("Waiting for output handling goroutine to complete")
-	wg.Wait()
-	Logf("handling goroutine is complete")
-	return err
+	var (
+		in *os.File
+		out *os.File
+		tasks sync.WaitGroup
+	)
+	for args := range commands {
+		cmd := Command(utils.SelfPath(), args...)
+		cmd.Args = cmd.Args[1:]
+		Logf("preparing command '%s'", cmd.Args[0])
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		// make it flow like pipelines (app to the left, plugin to the right)
+		// listen tcp://:4242 | foreground
+		// First command, setup in pipe
+		if in == nil {
+			in, err := cmd.InPipe()
+			if err != nil {
+				return err
+			}
+			defer in.Close()
+		} else {
+			cmd.In = out
+		}
+		// Always setup out pipe
+		out, err := cmd.OutPipe()
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		cmd.Start()
+		tasks.Add(1)
+		go func(cmd *Cmd) {
+			cmd.Wait()
+			Logf("wait: %s\n", cmd.Args[0])
+			tasks.Done()
+		}(cmd)
+	}
+	tasks.Wait()
+	return nil
 }
 
 func doChild() error {
-	in, err := chord.NewServerSession(nil)
+	in, err := chord.FdConn(3)
 	if err != nil {
 		Fatal(err)
 	}
-	out, err := chord.NewClient(nil)
+	out, err := chord.FdConn(4)
 	if err != nil {
 		Fatal(err)
 	}
-	if os.Args[0] == "listen" {
-		return CmdListen(os.Args, in, out)
-	} else if os.Args[0] == "echo" {
-		return CmdEcho(os.Args, in, out)
+	if cmd, exists := commands[os.Args[0]]; exists {
+		return cmd(os.Args, in, out)
 	}
 	return fmt.Errorf("no such command: %s", os.Args[0])
 }
@@ -169,20 +219,15 @@ type Cmd struct {
 	Out	*os.File
 }
 
-func (cmd *Cmd) beamPair() (*net.UnixConn, *os.File, error) {
+func (cmd *Cmd) beamPair() (*os.File, *os.File, error) {
 	pair, err := chord.SocketPair()
 	if err != nil {
 		return nil, nil, err
 	}
-	local, err := chord.FdConn(pair[1])
-	if err != nil {
-		return nil, nil, err
-	}
-	remote := os.NewFile(uintptr(pair[0]), "")
-	return local, remote, nil
+	return os.NewFile(uintptr(pair[0]), ""), os.NewFile(uintptr(pair[1]), ""), nil
 }
 
-func (cmd *Cmd) InPipe() (*net.UnixConn, error) {
+func (cmd *Cmd) InPipe() (*os.File, error) {
 	local, remote, err := cmd.beamPair()
 	if err != nil {
 		return nil, err
@@ -191,7 +236,7 @@ func (cmd *Cmd) InPipe() (*net.UnixConn, error) {
 	return local, nil
 }
 
-func (cmd *Cmd) OutPipe() (*net.UnixConn, error) {
+func (cmd *Cmd) OutPipe() (*os.File, error) {
 	local, remote, err := cmd.beamPair()
 	if err != nil {
 		return nil, err
