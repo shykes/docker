@@ -13,17 +13,45 @@ import (
 	"bufio"
 	"strings"
 	"io"
+	"io/ioutil"
+	"time"
 )
 
 var commands = map[string]func([]string, *net.UnixConn, *net.UnixConn)error {
 	"echo": CmdEcho,
 	"dump": CmdDump,
 	"listen": CmdListen,
+	"fakelisten": CmdFakeListen,
 }
 
 
 func CmdEcho(cmd []string, in *net.UnixConn, out *net.UnixConn) error {
 	fmt.Printf("%s\n", strings.Join(cmd[1:], " "))
+	return nil
+}
+
+func CmdFakeListen(cmd []string, in *net.UnixConn, out *net.UnixConn) error {
+	var (
+		connDelay = 3 * time.Second
+		writeDelay = 500 * time.Millisecond
+		writeCount = 10
+	)
+	var connId int
+	for {
+		connId++
+		p, err := chord.SendPipe(out, []byte("conn"))
+		if err != nil {
+			return err
+		}
+		go func(p *os.File) {
+			for i:=0; i<writeCount; i++ {
+				fmt.Fprintf(p, "hello there! this is a fake connection (connection #%d, message #%d)\n", connId, i)
+				time.Sleep(writeDelay)
+			}
+			p.Close()
+		}(p)
+		time.Sleep(connDelay)
+	}
 	return nil
 }
 
