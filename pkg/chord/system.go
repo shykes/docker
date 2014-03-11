@@ -8,6 +8,18 @@ import (
 )
 
 
+func SendPipe(conn *net.UnixConn, data []byte) (*os.File, error) {
+	local, remote, err := SocketPair()
+	if err != nil {
+		return nil, err
+	}
+	if err := Send(conn, data, remote); err != nil {
+		remote.Close()
+		return nil, err
+	}
+	return local, nil
+}
+
 
 func Send(conn *net.UnixConn, data []byte, f *os.File) error {
 	return send(conn, data, int(f.Fd()))
@@ -67,7 +79,13 @@ func socketpair() ([2]int, error) {
 	return syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_STREAM, 0)
 }
 
-var SocketPair = socketpair
+func SocketPair() (*os.File, *os.File, error) {
+	pair, err := socketpair()
+	if err != nil {
+		return nil, nil, err
+	}
+	return os.NewFile(uintptr(pair[0]), ""), os.NewFile(uintptr(pair[1]), ""), nil
+}
 
 
 func fdconn(fd int) (*net.UnixConn, error) {

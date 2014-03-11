@@ -183,6 +183,24 @@ func doShell() error {
 			tasks.Done()
 		}(cmd)
 	}
+	// End the pipeline with a discard drain (to allow the last command to send on out without blocking)
+	go func() {
+		Logf("draining output\n")
+		uout, err := chord.FdConn(int(out.Fd()))
+		if err != nil {
+			return
+		}
+		for {
+			msg, f, err := chord.Receive(uout)
+			if err != nil {
+				return
+			}
+			Logf("drain: %s\n", msg)
+			if f != nil {
+				go io.Copy(ioutil.Discard, f)
+			}
+		}
+	}()
 	tasks.Wait()
 	return nil
 }
@@ -219,16 +237,8 @@ type Cmd struct {
 	Out	*os.File
 }
 
-func (cmd *Cmd) beamPair() (*os.File, *os.File, error) {
-	pair, err := chord.SocketPair()
-	if err != nil {
-		return nil, nil, err
-	}
-	return os.NewFile(uintptr(pair[0]), ""), os.NewFile(uintptr(pair[1]), ""), nil
-}
-
 func (cmd *Cmd) InPipe() (*os.File, error) {
-	local, remote, err := cmd.beamPair()
+	local, remote, err := chord.SocketPair()
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +247,7 @@ func (cmd *Cmd) InPipe() (*os.File, error) {
 }
 
 func (cmd *Cmd) OutPipe() (*os.File, error) {
-	local, remote, err := cmd.beamPair()
+	local, remote, err := chord.SocketPair()
 	if err != nil {
 		return nil, err
 	}
