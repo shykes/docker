@@ -9,7 +9,7 @@ import (
 )
 
 func Hub() (*net.UnixConn, error) {
-	inside, outside, err := usocketpair()
+	inside, outside, err := USocketPair()
 	if err != nil {
 		return nil, err
 	}
@@ -148,27 +148,52 @@ func (r route) process() {
 		defer close(retryConns)
 		defer close(reuseBackends)
 		for {
-			conn, ok := <-conns
+			clientMsg, ok := <-conns
 			if !ok {
 				return
+			}
+			fmt.Printf("[route] next client connection to route: %v\n", clientMsg)
+			if clientMsg.f == nil {
+				continue
+			}
+			fmt.Printf("[route] next client connection to route: %v\n", clientMsg)
+			client, err := FdConn(int(clientMsg.f.Fd()))
+			if err != nil {
+				continue
 			}
 			backendMsg, ok := <-backends
 			if !ok {
 				return
 			}
 			if backendMsg.f == nil {
-				retryConns<-conn
+				retryConns<-clientMsg
 				continue
 			}
 			backend, err := FdConn(int(backendMsg.f.Fd()))
 			if err != nil {
-				retryConns<-conn
+				retryConns<-clientMsg
 				continue
 			}
-			if err := Send(backend, conn.data, conn.f); err != nil {
-				retryConns<-conn
+			fmt.Printf("[route] backend and client ready to join. creating socketpair\n")
+			a, b, err := SocketPair()
+			if err != nil {
+				panic(fmt.Sprintf("can't create socket pair: %v", err))
+			}
+			fmt.Printf("[route] sending to backend fd=%v\n", a.Fd())
+			if err := Send(backend, clientMsg.data, a); err != nil {
+				a.Close()
+				b.Close()
+				retryConns<-clientMsg
 				continue
 			}
+			fmt.Printf("[route] sending to client fd=%v\n", b.Fd())
+			if err := Send(client, backendMsg.data, b); err != nil {
+				a.Close()
+				b.Close()
+				reuseBackends<-backendMsg
+				continue
+			}
+			// At this point, incredibly, everything worked.
 			reuseBackends<-backendMsg
 		}
 	}()
@@ -180,22 +205,3 @@ type msg struct {
 	f *os.File
 }
 
-func usocketpair() (*net.UnixConn, *net.UnixConn, error) {
-	a, b, err := SocketPair()
-	if err != nil {
-		return nil, nil, err
-	}
-	uA, err := FdConn(int(a.Fd()))
-	if err != nil {
-		a.Close()
-		b.Close()
-		return nil, nil, err
-	}
-	uB, err := FdConn(int(b.Fd()))
-	if err != nil {
-		a.Close()
-		b.Close()
-		return nil, nil, err
-	}
-	return uA, uB, nil
-}
