@@ -481,6 +481,22 @@ func TestBuildRelativeWorkdir(t *testing.T) {
 	}
 }
 
+func TestBuildAddWorkdir(t *testing.T) {
+	_, err := buildImage(testContextTemplate{`
+		FROM {IMAGE}
+		WORKDIR /test1
+		WORKDIR test2
+		ADD . .
+		ADD foo foo2
+		WORKDIR /
+		RUN [ "$(cat test1/test2/foo)" = 'bar' ]
+		RUN [ "$(cat /test1/test2/foo2)" = 'bar' ]
+	`, [][2]string{{"foo", "bar"}}, nil}, t, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBuildEnv(t *testing.T) {
 	img, err := buildImage(testContextTemplate{`
         from {IMAGE}

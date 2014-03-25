@@ -520,6 +520,10 @@ func (b *buildFile) CmdAdd(args string) error {
 		return err
 	}
 
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join("/", b.config.WorkingDir, dest)
+	}
+
 	cmd := b.config.Cmd
 	b.config.Cmd = []string{"/bin/sh", "-c", fmt.Sprintf("#(nop) ADD %s in %s", orig, dest)}
 	defer func(cmd []string) { b.config.Cmd = cmd }(cmd)
