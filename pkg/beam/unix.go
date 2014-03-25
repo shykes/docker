@@ -116,7 +116,7 @@ func SendPipe(conn *net.UnixConn, data []byte) (endpoint *net.UnixConn, err erro
 			remote.Close()
 		}
 	}()
-	endpoint, err = FdConn(int(local.Fd()))
+	endpoint, err = FdConn(local)
 	if err != nil {
 		return nil, err
 	}
@@ -213,15 +213,17 @@ func USocketPair() (*net.UnixConn, *net.UnixConn, error) {
 	}
 	defer a.Close()
 	defer b.Close()
-	uA, err := FdConn(int(a.Fd()))
+	uA, err := FdConn(a)
 	if err != nil {
 		return nil, nil, err
 	}
-	uB, err := FdConn(int(b.Fd()))
+
+	uB, err := FdConn(b)
 	if err != nil {
 		uA.Close()
 		return nil, nil, err
 	}
+
 	return uA, uB, nil
 }
 
@@ -229,11 +231,10 @@ func USocketPair() (*net.UnixConn, *net.UnixConn, error) {
 // returns an error if the file descriptor does not point to a unix socket.
 // This creates a duplicate file descriptor. It's the caller's responsibility
 // to close both.
-func FdConn(fd int) (n*net.UnixConn, err error) {
+func FdConn(f *os.File) (*net.UnixConn, error) {
 	{
-		debugCheckpoint("===DEBUG=== FdConn([%d]) = (unknown fd). Hit enter to confirm: ", fd)
+		debugCheckpoint("===DEBUG=== FdConn([%d]) = (unknown fd). Hit enter to confirm: ", f.Fd())
 	}
-	f := os.NewFile(uintptr(fd), fmt.Sprintf("%d", fd))
 	conn, err := net.FileConn(f)
 	if err != nil {
 		return nil, err
@@ -241,7 +242,7 @@ func FdConn(fd int) (n*net.UnixConn, err error) {
 	uconn, ok := conn.(*net.UnixConn)
 	if !ok {
 		conn.Close()
-		return nil, fmt.Errorf("%d: not a unix connection", fd)
+		return nil, fmt.Errorf("%d: not a unix connection", f.Fd())
 	}
 	return uconn, nil
 }
