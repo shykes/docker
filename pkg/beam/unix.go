@@ -21,6 +21,7 @@ func debugCheckpoint(msg string, args ...interface{}) {
 
 // Send sends a new message on conn with data and f as payload and
 // attachment, respectively.
+// On success, f is closed
 func Send(conn *net.UnixConn, data []byte, f *os.File) error {
 	{
 		var fd int = -1
@@ -33,7 +34,14 @@ func Send(conn *net.UnixConn, data []byte, f *os.File) error {
 	if f != nil {
 		fds = append(fds, int(f.Fd()))
 	}
-	return sendUnix(conn, data, fds...)
+	if err := sendUnix(conn, data, fds...); err != nil {
+		return err
+	}
+
+	if f != nil {
+		f.Close()
+	}
+	return nil
 }
 
 // Receive waits for a new message on conn, and receives its payload
@@ -139,11 +147,6 @@ func receiveUnix(conn *net.UnixConn) ([]byte, []int, error) {
 
 func sendUnix(conn *net.UnixConn, data []byte, fds ...int) error {
 	_, _, err := conn.WriteMsgUnix(data, syscall.UnixRights(fds...), nil)
-	if err == nil {
-		for _, fd := range fds {
-			syscall.Close(fd)
-		}
-	}
 	return err
 }
 
