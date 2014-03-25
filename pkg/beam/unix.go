@@ -59,16 +59,11 @@ func Receive(conn *net.UnixConn) (rdata []byte, rf *os.File, rerr error) {
 		debugCheckpoint("===DEBUG=== Receive() -> '%s'[%d]. Hit enter to continue.\n", rdata, fd)
 	}()
 	for {
-		data, fds, err := receiveUnix(conn)
+		data, fds, err := receiveUnix(conn, 1)
 		if err != nil {
 			return nil, nil, err
 		}
 		var f *os.File
-		if len(fds) > 1 {
-			for _, fd := range fds[1:] {
-				syscall.Close(fd)
-			}
-		}
 		if len(fds) >= 1 {
 			f = os.NewFile(uintptr(fds[0]), "")
 		}
@@ -135,14 +130,14 @@ func SendPipe(conn *net.UnixConn, data []byte) (endpoint *net.UnixConn, err erro
 	return endpoint, nil
 }
 
-func receiveUnix(conn *net.UnixConn) ([]byte, []int, error) {
+func receiveUnix(conn *net.UnixConn, maxFds int) ([]byte, []int, error) {
 	buf := make([]byte, 4096)
-	oob := make([]byte, 4096)
+	oob := make([]byte, syscall.CmsgSpace(maxFds*4))
 	bufn, oobn, _, _, err := conn.ReadMsgUnix(buf, oob)
 	if err != nil {
 		return nil, nil, err
 	}
-	return buf[:bufn], extractFds(oob[:oobn]), nil
+	return buf[:bufn], extractFds(oob[:oobn], maxFds), nil
 }
 
 func sendUnix(conn *net.UnixConn, data []byte, fds ...int) error {
@@ -150,7 +145,7 @@ func sendUnix(conn *net.UnixConn, data []byte, fds ...int) error {
 	return err
 }
 
-func extractFds(oob []byte) (fds []int) {
+func extractFds(oob []byte, maxFds int) (fds []int) {
 	// Grab forklock to make sure no forks accidentally inherit the new
 	// fds before they are made CLOEXEC
 	// There is a slight race condition between ReadMsgUnix returns and
@@ -168,10 +163,13 @@ func extractFds(oob []byte) (fds []int) {
 		if err != nil {
 			continue
 		}
-		fds = append(fds, gotFds...)
-
-		for _, fd := range fds {
-			syscall.CloseOnExec(fd)
+		for i, fd := range gotFds {
+			if i >= maxFds {
+				syscall.Close(fd)
+			} else {
+				syscall.CloseOnExec(fd)
+				fds = append(fds, fd)
+			}
 		}
 	}
 	return
