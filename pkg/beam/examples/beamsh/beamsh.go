@@ -56,15 +56,15 @@ func main() {
 	}
 }
 
-func beamCopy(dst *net.UnixConn, src *net.UnixConn) error {
+func beamCopy(dst *beam.BeamConn, src *beam.BeamConn) error {
 	for {
-		payload, attachment, err := beam.Receive(src)
+		payload, attachment, err := src.Receive()
 		if err == io.EOF {
 			return nil
 		} else if err != nil {
 			return err
 		}
-		if err := beam.Send(dst, payload, attachment); err != nil {
+		if err := dst.Send(payload, attachment); err != nil {
 			if attachment != nil {
 				attachment.Close()
 			}
@@ -75,17 +75,17 @@ func beamCopy(dst *net.UnixConn, src *net.UnixConn) error {
 	return nil
 }
 
-type Handler func([]string, *net.UnixConn, *net.UnixConn)
+type Handler func([]string, *beam.BeamConn, *beam.BeamConn)
 
-func Devnull() (*net.UnixConn, error) {
-	priv, pub, err := beam.USocketPair()
+func Devnull() (*beam.BeamConn, error) {
+	priv, pub, err := beam.BeamPair()
 	if err != nil {
 		return nil, err
 	}
 	go func() {
 		defer priv.Close()
 		for {
-			payload, attachment, err := beam.Receive(priv)
+			payload, attachment, err := priv.Receive()
 			if err != nil {
 				return
 			}
@@ -112,7 +112,7 @@ func scriptString(script []*dockerscript.Command) string {
 	return fmt.Sprintf("'%s'", strings.Join(lines, "; "))
 }
 
-func executeScript(client *net.UnixConn, script []*dockerscript.Command) error {
+func executeScript(client *beam.BeamConn, script []*dockerscript.Command) error {
 	Debugf("executeScript(%s)\n", scriptString(script))
 	defer Debugf("executeScript(%s) DONE\n", scriptString(script))
 	for _, cmd := range script {
@@ -129,15 +129,15 @@ func executeScript(client *net.UnixConn, script []*dockerscript.Command) error {
 //	4) [in the background] Run the handler
 //	5) Recursively executeScript() all children commands and wait for them to complete
 //	6) Wait for handler to return and (shortly afterwards) output copy to complete
-//	7) 
-func executeCommand(client *net.UnixConn, cmd *dockerscript.Command) error {
+//	7)
+func executeCommand(client *beam.BeamConn, cmd *dockerscript.Command) error {
 	Debugf("executeCommand(%s)\n", strings.Join(cmd.Args, " "))
 	defer Debugf("executeCommand(%s) DONE\n", strings.Join(cmd.Args, " "))
 	handler := GetHandler(cmd.Args[0])
 	if handler == nil {
 		return fmt.Errorf("no such command: %s", cmd.Args[0])
 	}
-	inPub, inPriv, err := beam.USocketPair()
+	inPub, inPriv, err := beam.BeamPair()
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func executeCommand(client *net.UnixConn, cmd *dockerscript.Command) error {
 	// by children).
 	// Otherwise we get a deadlock.
 	defer inPriv.Close()
-	outPub, outPriv, err := beam.USocketPair()
+	outPub, outPriv, err := beam.BeamPair()
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func randomId() string {
 
 func GetHandler(name string) Handler {
 	if name == "exec" {
-		return func(args []string, in *net.UnixConn, out *net.UnixConn) {
+		return func(args []string, in *beam.BeamConn, out *beam.BeamConn) {
 			cmd := exec.Command(args[1], args[2:]...)
 			outR, outW, err := os.Pipe()
 			if err != nil {
@@ -199,8 +199,8 @@ func GetHandler(name string) Handler {
 				return
 			}
 			cmd.Stderr = errW
-			beam.Send(out, data.Empty().Set("cmd", "log", "stdout").Bytes(), outR)
-			beam.Send(out, data.Empty().Set("cmd", "log", "stderr").Bytes(), errR)
+			out.Send(data.Empty().Set("cmd", "log", "stdout").Bytes(), outR)
+			out.Send(data.Empty().Set("cmd", "log", "stderr").Bytes(), errR)
 			execErr := cmd.Run()
 			var status string
 			if execErr != nil {
@@ -208,12 +208,12 @@ func GetHandler(name string) Handler {
 			} else {
 				status = "ok"
 			}
-			beam.Send(out, data.Empty().Set("status", status).Set("cmd", args...).Bytes(), nil)
+			out.Send(data.Empty().Set("status", status).Set("cmd", args...).Bytes(), nil)
 		}
 	} else if name == "trace" {
-		return func(args []string, in *net.UnixConn, out *net.UnixConn) {
+		return func(args []string, in *beam.BeamConn, out *beam.BeamConn) {
 			for {
-				p, a, err := beam.Receive(in)
+				p, a, err := in.Receive()
 				if err != nil {
 					return
 				}
@@ -227,17 +227,17 @@ func GetHandler(name string) Handler {
 					msg = fmt.Sprintf("%s [%d]", msg, a.Fd())
 				}
 				fmt.Printf("===> %s\n", msg)
-				beam.Send(out, p, a)
+				out.Send(p, a)
 			}
 		}
 	} else if name == "emit" {
-		return func(args []string, in *net.UnixConn, out *net.UnixConn) {
-			beam.Send(out, data.Empty().Set("foo", args[1:]...).Bytes(), nil)
+		return func(args []string, in *beam.BeamConn, out *beam.BeamConn) {
+			out.Send(data.Empty().Set("foo", args[1:]...).Bytes(), nil)
 		}
 	} else if name == "print" {
-		return func(args []string, in *net.UnixConn, out *net.UnixConn) {
+		return func(args []string, in *beam.BeamConn, out *beam.BeamConn) {
 			for {
-				_, a, err := beam.Receive(in)
+				_, a, err := in.Receive()
 				if err != nil {
 					return
 				}
@@ -247,10 +247,10 @@ func GetHandler(name string) Handler {
 			}
 		}
 	} else if name == "multiprint" {
-		return func(args []string, in *net.UnixConn, out *net.UnixConn) {
+		return func(args []string, in *beam.BeamConn, out *beam.BeamConn) {
 			var tasks sync.WaitGroup
 			for {
-				payload, a, err := beam.Receive(in)
+				payload, a, err := in.Receive()
 				if err != nil {
 					return
 				}
@@ -269,25 +269,25 @@ func GetHandler(name string) Handler {
 			tasks.Wait()
 		}
 	} else if name == "listen" {
-		return func(args []string, in *net.UnixConn, out *net.UnixConn) {
+		return func(args []string, in *beam.BeamConn, out *beam.BeamConn) {
 			if len(args) != 2 {
-				beam.Send(out, data.Empty().Set("status", "1").Set("message", "wrong number of arguments").Bytes(), nil)
+				out.Send(data.Empty().Set("status", "1").Set("message", "wrong number of arguments").Bytes(), nil)
 				return
 			}
 			u, err := url.Parse(args[1])
 			if err != nil {
-				beam.Send(out, data.Empty().Set("status", "1").Set("message", err.Error()).Bytes(), nil)
+				out.Send(data.Empty().Set("status", "1").Set("message", err.Error()).Bytes(), nil)
 				return
 			}
 			l, err := net.Listen(u.Scheme, u.Host)
 			if err != nil {
-				beam.Send(out, data.Empty().Set("status", "1").Set("message", err.Error()).Bytes(), nil)
+				out.Send(data.Empty().Set("status", "1").Set("message", err.Error()).Bytes(), nil)
 				return
 			}
 			for {
 				conn, err := l.Accept()
 				if err != nil {
-					beam.Send(out, data.Empty().Set("status", "1").Set("message", err.Error()).Bytes(), nil)
+					out.Send(data.Empty().Set("status", "1").Set("message", err.Error()).Bytes(), nil)
 					return
 				}
 				f, err := connToFile(conn)
@@ -295,23 +295,23 @@ func GetHandler(name string) Handler {
 					conn.Close()
 					continue
 				}
-				beam.Send(out, data.Empty().Set("type", "socket").Set("remoteaddr", conn.RemoteAddr().String()).Bytes(), f)
+				out.Send(data.Empty().Set("type", "socket").Set("remoteaddr", conn.RemoteAddr().String()).Bytes(), f)
 			}
 		}
 	} else if name == "connect" {
-		return func(args []string, in *net.UnixConn, out *net.UnixConn) {
+		return func(args []string, in *beam.BeamConn, out *beam.BeamConn) {
 			if len(args) != 2 {
-				beam.Send(out, data.Empty().Set("status", "1").Set("message", "wrong number of arguments").Bytes(), nil)
+				out.Send(data.Empty().Set("status", "1").Set("message", "wrong number of arguments").Bytes(), nil)
 				return
 			}
 			u, err := url.Parse(args[1])
 			if err != nil {
-				beam.Send(out, data.Empty().Set("status", "1").Set("message", err.Error()).Bytes(), nil)
+				out.Send(data.Empty().Set("status", "1").Set("message", err.Error()).Bytes(), nil)
 				return
 			}
 			var tasks sync.WaitGroup
 			for {
-				_, attachment, err := beam.Receive(in)
+				_, attachment, err := in.Receive()
 				if err != nil {
 					break
 				}
@@ -321,10 +321,10 @@ func GetHandler(name string) Handler {
 				Logf("connecting to %s/%s\n", u.Scheme, u.Host)
 				conn, err := net.Dial(u.Scheme, u.Host)
 				if err != nil {
-					beam.Send(out, data.Empty().Set("cmd", "msg", "connect error: " + err.Error()).Bytes(), nil)
+					out.Send(data.Empty().Set("cmd", "msg", "connect error: "+err.Error()).Bytes(), nil)
 					return
 				}
-				beam.Send(out, data.Empty().Set("cmd", "msg", "connection established").Bytes(), nil)
+				out.Send(data.Empty().Set("cmd", "msg", "connection established").Bytes(), nil)
 				tasks.Add(1)
 				go func(attachment *os.File, conn net.Conn) {
 					defer tasks.Done()
@@ -348,13 +348,13 @@ func GetHandler(name string) Handler {
 			tasks.Wait()
 		}
 	} else if name == "openfile" {
-		return func(args []string, in *net.UnixConn, out *net.UnixConn) {
+		return func(args []string, in *beam.BeamConn, out *beam.BeamConn) {
 			for _, name := range args {
 				f, err := os.Open(name)
 				if err != nil {
 					continue
 				}
-				if err := beam.Send(out, data.Empty().Set("path", name).Set("type", "file").Bytes(), f); err != nil {
+				if err := out.Send(data.Empty().Set("path", name).Set("type", "file").Bytes(), f); err != nil {
 					f.Close()
 				}
 			}
@@ -364,7 +364,9 @@ func GetHandler(name string) Handler {
 }
 
 func connToFile(conn net.Conn) (f *os.File, err error) {
-	if connWithFile, ok := conn.(interface { File() (*os.File, error) }); !ok {
+	if connWithFile, ok := conn.(interface {
+		File() (*os.File, error)
+	}); !ok {
 		return nil, fmt.Errorf("no file descriptor available")
 	} else {
 		f, err = connWithFile.File()
@@ -376,7 +378,7 @@ func connToFile(conn net.Conn) (f *os.File, err error) {
 }
 
 // 'status' is a notification of a job's status.
-// 
+//
 func parseEnv(args []string) ([]string, map[string]string) {
 	var argsOut []string
 	env := make(map[string]string)
@@ -397,12 +399,12 @@ func parseEnv(args []string) ([]string, map[string]string) {
 }
 
 type Msg struct {
-	payload		[]byte
-	attachment	*os.File
+	payload    []byte
+	attachment *os.File
 }
 
 func Logf(msg string, args ...interface{}) (int, error) {
-	if len(msg) == 0 || msg[len(msg) - 1] != '\n' {
+	if len(msg) == 0 || msg[len(msg)-1] != '\n' {
 		msg = msg + "\n"
 	}
 	msg = fmt.Sprintf("[%v] [%v] %s", os.Getpid(), path.Base(os.Args[0]), msg)
@@ -415,7 +417,7 @@ func Debugf(msg string, args ...interface{}) {
 	}
 }
 
-func Fatalf(msg string, args ...interface{})  {
+func Fatalf(msg string, args ...interface{}) {
 	Logf(msg, args)
 	os.Exit(1)
 }

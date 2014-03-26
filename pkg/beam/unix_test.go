@@ -50,13 +50,13 @@ func TestUSocketPair(t *testing.T) {
 }
 
 func TestSendUnixSocket(t *testing.T) {
-	a1, a2, err := USocketPair()
+	a1, a2, err := BeamPair()
 	if err != nil {
 		t.Fatal(err)
 	}
 	// defer a1.Close()
 	// defer a2.Close()
-	b1, b2, err := USocketPair()
+	b1, b2, err := BeamPair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,25 +69,25 @@ func TestSendUnixSocket(t *testing.T) {
 	// defer glueA.Close()
 	// defer glueB.Close()
 	go func() {
-		err := Send(b2, []byte("a"), glueB)
+		err := b2.Send([]byte("a"), glueB)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}()
 	go func() {
-		err := Send(a2, []byte("b"), glueA)
+		err := a2.Send([]byte("b"), glueA)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}()
-	connAhdr, connA, err := Receive(a1)
+	connAhdr, connA, err := a1.Receive()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(connAhdr) != "b" {
 		t.Fatalf("unexpected: %s", connAhdr)
 	}
-	connBhdr, connB, err := Receive(b1)
+	connBhdr, connB, err := b1.Receive()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestSendUnixSocket(t *testing.T) {
 
 // Ensure we get proper segmenting of messages
 func TestSendSegmenting(t *testing.T) {
-	a, b, err := USocketPair()
+	a, b, err := BeamPair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +126,12 @@ func TestSendSegmenting(t *testing.T) {
 	extrafd2.Close()
 
 	go func() {
-		Send(a, []byte("message 1"), nil)
-		Send(a, []byte("message 2"), extrafd1)
-		Send(a, []byte("message 3"), nil)
+		a.Send([]byte("message 1"), nil)
+		a.Send([]byte("message 2"), extrafd1)
+		a.Send([]byte("message 3"), nil)
 	}()
 
-	msg1, file1, err := Receive(b)
+	msg1, file1, err := b.Receive()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestSendSegmenting(t *testing.T) {
 		t.Fatal("unexpectedly got file1")
 	}
 
-	msg2, file2, err := Receive(b)
+	msg2, file2, err := b.Receive()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestSendSegmenting(t *testing.T) {
 	}
 	file2.Close()
 
-	msg3, file3, err := Receive(b)
+	msg3, file3, err := b.Receive()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,17 +169,17 @@ func TestSendSegmenting(t *testing.T) {
 
 // Test sending a zero byte message
 func TestSendEmpty(t *testing.T) {
-	a, b, err := USocketPair()
+	a, b, err := BeamPair()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
 	defer b.Close()
 	go func() {
-		Send(a, []byte{}, nil)
+		a.Send([]byte{}, nil)
 	}()
 
-	msg, file, err := Receive(b)
+	msg, file, err := b.Receive()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,17 +214,17 @@ func verifyLarge(data []byte, size int) bool {
 
 // Test sending a large message
 func TestSendLarge(t *testing.T) {
-	a, b, err := USocketPair()
+	a, b, err := BeamPair()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
 	defer b.Close()
 	go func() {
-		Send(a, makeLarge(100000), nil)
+		a.Send(makeLarge(100000), nil)
 	}()
 
-	msg, file, err := Receive(b)
+	msg, file, err := b.Receive()
 	if err != nil {
 		t.Fatal(err)
 	}
