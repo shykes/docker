@@ -84,6 +84,22 @@ func main() {
 	}
 }
 
+func sendTee(dst beam.Sender, payload []byte, src io.Reader) (io.Reader, error) {
+	w, err := beam.SendPipe(dst, payload)
+	if err != nil {
+		return nil, err
+	}
+	sinkR, sinkW := io.Pipe()
+	go func() {
+		if src != nil {
+			io.Copy(io.MultiWriter(w, sinkW), src)
+		}
+		w.Close()
+		sinkW.Close()
+	}()
+	return sinkR, err
+}
+
 func executeRootScript(script []*dockerscript.Command) error {
 	if len(rootPlugins) > 0 {
 		// If there are root plugins, wrap the script inside them
@@ -407,44 +423,45 @@ func GetHandler(name string) Handler {
 			defer stderr.Close()
 			var tasks sync.WaitGroup
 			defer tasks.Wait()
-			for {
-				payload, attachment, err := in.Receive()
+
+			r := beam.NewRouter(out)
+			r.NewRoute().HasAttachment().KeyStartsWith("cmd", "log").Handler(func(payload []byte, attachment *os.File) error {
+				tasks.Add(1)
+				go func() {
+					defer tasks.Done()
+					defer attachment.Close()
+					io.Copy(os.Stdout, attachment)
+					attachment.Close()
+				}()
+				return nil
+			}).Tee(out)
+			// Catch logs
+			/*
+			r.NewRoute().HasAttachment().KeyStartsWith("cmd", "log").Handler(func(payload []byte, attachment *os.File) error {
+				tee, err := sendTee(out, payload, attachment)
 				if err != nil {
-					return
+					return fmt.Errorf("sendtee: %v", err)
 				}
-				cmd := data.Message(payload).Get("cmd")
-				if attachment != nil && len(cmd) > 0 && cmd[0] == "log" {
-					w, err := beam.SendPipe(out, payload)
-					if err != nil {
-						attachment.Close()
-						fmt.Fprintf(stderr, "sendpipe: %v\n", err)
-						return
-					}
-					tasks.Add(1)
-					go func(payload []byte, attachment *os.File, sink *os.File) {
-						defer tasks.Done()
-						defer attachment.Close()
-						defer sink.Close()
-						cmd := data.Message(payload).Get("cmd")
-						if cmd == nil || len(cmd) == 0 {
-							return
-						}
-						if cmd[0] != "log" {
-							return
-						}
-						var output io.Writer
-						if len(cmd) == 1 || cmd[1] == "stdout" {
-							output = os.Stdout
-						} else if cmd[1] == "stderr" {
-							output = os.Stderr
-						}
-						io.Copy(io.MultiWriter(output, sink), attachment)
-					}(payload, attachment, w)
+				var output io.Writer
+				if cmd := data.Message(payload).Get("cmd"); len(cmd) > 2 && cmd[2] == "stderr" {
+					output = os.Stderr
 				} else {
-					if err := out.Send(payload, attachment); err != nil {
-						return
-					}
+					output = os.Stdout
 				}
+				tasks.Add(1)
+				fmt.Printf("[STDIO] starting copy\n")
+				go func() {
+					defer tasks.Done()
+					io.Copy(output, tee)
+				}()
+				return nil
+			})
+			*/
+
+			if _, err := beam.Copy(r, in); err != nil {
+				Fatal(err)
+				fmt.Fprintf(stderr, "%v\n", err)
+				return
 			}
 		}
 	} else if name == "echo" {
@@ -851,13 +868,9 @@ func SendToConn(connections chan net.Conn, src beam.Receiver) error {
 	return nil
 }
 
-func msgDesc(payload []byte, attachment *os.File) string {
-	var filedesc string = "<nil>"
-	if attachment != nil {
-		filedesc = fmt.Sprintf("%d", attachment.Fd())
-	}
-	return fmt.Sprintf("'%s'[%s]", payload, filedesc)
 
+func msgDesc(payload []byte, attachment *os.File) string {
+	return beam.MsgDesc(payload, attachment)
 }
 
 func ReceiveFromConn(connections chan net.Conn, dst beam.Sender) error {
