@@ -235,6 +235,22 @@ func TestBuildWithInaccessibleFilesInContext(t *testing.T) {
 	logDone("build - ADD from context with accessible links must work")
 }
 
+// Test regression for gh#3960, gh#4848
+func TestBuildAddRelative(t *testing.T) {
+	buildDirectory := filepath.Join(workingDirectory, "build_tests", "TestBuildAddRelative")
+	buildCmd := exec.Command(dockerBinary, "build", "-t", "foobuildaddrelative", ".")
+	buildCmd.Dir = buildDirectory
+	out, exitCode, err := runCommandWithOutput(buildCmd)
+	errorOut(err, t, fmt.Sprintf("build failed to complete: %v %v", out, err))
+
+	if err != nil || exitCode != 0 {
+		t.Fatal("failed to build the image")
+	}
+	go deleteImages("foobuiladdrelative")
+
+	logDone("build - add relative to workdir")
+}
+
 // TODO: TestCaching
 
 // TODO: TestADDCacheInvalidation
