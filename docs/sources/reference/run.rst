@@ -320,6 +320,15 @@ then the client container can access the exposed port via a private
 networking interface. Docker will set some environment variables in
 the client container to help indicate which interface and port to use.
 
+Docker will also map the private IP address to the alias of a linked 
+container by inserting an entry into ``/etc/hosts`` inside the 
+``.dockerlocal`` domain. You can use this mechanism to communicate with
+a linked container by its alias::
+
+    docker run -d --name servicename busybox sleep 30
+    docker run -i -t --link servicename:servicealias busybox ping -c 1 servicealias.dockerlocal
+
+
 ENV (Environment Variables)
 ---------------------------
 

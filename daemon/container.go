@@ -464,7 +464,7 @@ func (container *Container) StderrPipe() (io.ReadCloser, error) {
 	return utils.NewBufReader(reader), nil
 }
 
-func (container *Container) buildHostnameAndHostsFiles(IP string) {
+func (container *Container) buildHostnameAndHostsFiles(IP string) error {
 	container.HostnamePath = path.Join(container.root, "hostname")
 	ioutil.WriteFile(container.HostnamePath, []byte(container.Config.Hostname+"\n"), 0644)
 
@@ -477,6 +477,16 @@ ff02::1		ip6-allnodes
 ff02::2		ip6-allrouters
 `)
 
+	children, err := container.daemon.Children(container.Name)
+	if err != nil {
+		return err
+	}
+
+	for linkAlias, child := range children {
+		_, alias := path.Split(linkAlias)
+		hostsContent = append([]byte(fmt.Sprintf("%s\t%s.dockerlocal\n", child.NetworkSettings.IPAddress, alias)), hostsContent...)
+	}
+
 	container.HostsPath = path.Join(container.root, "hosts")
 
 	if container.Config.Domainname != "" {
@@ -486,6 +496,8 @@ ff02::2		ip6-allrouters
 	}
 
 	ioutil.WriteFile(container.HostsPath, hostsContent, 0644)
+
+	return nil
 }
 
 func (container *Container) allocateNetwork() error {
@@ -989,14 +1001,17 @@ func (container *Container) setupContainerDns() error {
 }
 
 func (container *Container) initializeNetworking() error {
+	ipAddress := "127.0.1.1"
 	if container.daemon.config.DisableNetwork {
 		container.Config.NetworkDisabled = true
-		container.buildHostnameAndHostsFiles("127.0.1.1")
 	} else {
 		if err := container.allocateNetwork(); err != nil {
 			return err
 		}
-		container.buildHostnameAndHostsFiles(container.NetworkSettings.IPAddress)
+		ipAddress = container.NetworkSettings.IPAddress
+	}
+	if err := container.buildHostnameAndHostsFiles(ipAddress); err != nil {
+		return err
 	}
 	return nil
 }
