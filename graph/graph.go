@@ -5,6 +5,7 @@ import (
 	"github.com/dotcloud/docker/archive"
 	"github.com/dotcloud/docker/dockerversion"
 	"github.com/dotcloud/docker/image"
+	"github.com/dotcloud/docker/pkg/fs"
 	"github.com/dotcloud/docker/runconfig"
 	"github.com/dotcloud/docker/runtime/graphdriver"
 	"github.com/dotcloud/docker/utils"
@@ -104,7 +105,7 @@ func (graph *Graph) Get(name string) (*image.Image, error) {
 
 		var size int64
 		if img.Parent == "" {
-			if size, err = utils.TreeSize(rootfs); err != nil {
+			if size, err = fs.TreeSize(rootfs); err != nil {
 				return nil, err
 			}
 		} else {

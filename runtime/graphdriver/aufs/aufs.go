@@ -27,6 +27,7 @@ import (
 	mountpk "github.com/dotcloud/docker/pkg/mount"
 	"github.com/dotcloud/docker/runtime/graphdriver"
 	"github.com/dotcloud/docker/utils"
+	"github.com/dotcloud/docker/pkg/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -281,7 +282,7 @@ func (a *Driver) ApplyDiff(id string, diff archive.ArchiveReader) error {
 
 // Returns the size of the contents for the id
 func (a *Driver) DiffSize(id string) (int64, error) {
-	return utils.TreeSize(path.Join(a.rootPath(), "diff", id))
+	return fs.TreeSize(path.Join(a.rootPath(), "diff", id))
 }
 
 func (a *Driver) Changes(id string) ([]archive.Change, error) {

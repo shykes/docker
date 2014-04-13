@@ -9,6 +9,7 @@ import (
 	"github.com/dotcloud/docker/image"
 	"github.com/dotcloud/docker/links"
 	"github.com/dotcloud/docker/nat"
+	"github.com/dotcloud/docker/pkg/fs"
 	"github.com/dotcloud/docker/runconfig"
 	"github.com/dotcloud/docker/runtime/execdriver"
 	"github.com/dotcloud/docker/runtime/graphdriver"
@@ -1107,7 +1108,7 @@ func (container *Container) GetSize() (int64, int64) {
 	}
 
 	if _, err = os.Stat(container.basefs); err != nil {
-		if sizeRootfs, err = utils.TreeSize(container.basefs); err != nil {
+		if sizeRootfs, err = fs.TreeSize(container.basefs); err != nil {
 			sizeRootfs = -1
 		}
 	}

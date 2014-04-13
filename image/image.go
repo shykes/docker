@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
+	"github.com/dotcloud/docker/pkg/fs"
 	"github.com/dotcloud/docker/runconfig"
 	"github.com/dotcloud/docker/runtime/graphdriver"
 	"github.com/dotcloud/docker/utils"
@@ -94,7 +95,7 @@ func StoreImage(img *Image, jsonData []byte, layerData archive.ArchiveReader, ro
 			utils.Debugf("Untar time: %vs", time.Now().UTC().Sub(start).Seconds())
 
 			if img.Parent == "" {
-				if size, err = utils.TreeSize(layer); err != nil {
+				if size, err = fs.TreeSize(layer); err != nil {
 					return err
 				}
 			} else {

@@ -9,6 +9,7 @@ import (
 	"github.com/dotcloud/docker/engine"
 	"github.com/dotcloud/docker/graph"
 	"github.com/dotcloud/docker/image"
+	"github.com/dotcloud/docker/pkg/fs"
 	"github.com/dotcloud/docker/pkg/graphdb"
 	"github.com/dotcloud/docker/pkg/mount"
 	"github.com/dotcloud/docker/pkg/selinux"
@@ -759,7 +760,7 @@ func NewRuntimeFromDirectory(config *daemonconfig.Config, eng *engine.Engine) (*
 		if err := os.Mkdir(path.Dir(localCopy), 0700); err != nil && !os.IsExist(err) {
 			return nil, err
 		}
-		if _, err := utils.CopyFile(sysInitPath, localCopy); err != nil {
+		if _, err := fs.CopyFile(sysInitPath, localCopy); err != nil {
 			return nil, err
 		}
 		if err := os.Chmod(localCopy, 0700); err != nil {

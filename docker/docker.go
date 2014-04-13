@@ -15,6 +15,7 @@ import (
 	"github.com/dotcloud/docker/dockerversion"
 	"github.com/dotcloud/docker/engine"
 	"github.com/dotcloud/docker/opts"
+	"github.com/dotcloud/docker/pkg/fs"
 	flag "github.com/dotcloud/docker/pkg/mflag"
 	"github.com/dotcloud/docker/sysinit"
 	"github.com/dotcloud/docker/utils"
@@ -103,7 +104,7 @@ func main() {
 
 		// set up the TempDir to use a canonical path
 		tmp := os.TempDir()
-		realTmp, err := utils.ReadSymlinkedDirectory(tmp)
+		realTmp, err := fs.ReadSymlinkedDirectory(tmp)
 		if err != nil {
 			log.Fatalf("Unable to get the full path to the TempDir (%s): %s", tmp, err)
 		}
@@ -115,7 +116,7 @@ func main() {
 		if _, err := os.Stat(root); err != nil && os.IsNotExist(err) {
 			realRoot = root
 		} else {
-			realRoot, err = utils.ReadSymlinkedDirectory(root)
+			realRoot, err = fs.ReadSymlinkedDirectory(root)
 			if err != nil {
 				log.Fatalf("Unable to get the full path to root (%s): %s", root, err)
 			}

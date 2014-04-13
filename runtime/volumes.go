@@ -3,8 +3,8 @@ package runtime
 import (
 	"fmt"
 	"github.com/dotcloud/docker/archive"
+	"github.com/dotcloud/docker/pkg/fs"
 	"github.com/dotcloud/docker/runtime/execdriver"
-	"github.com/dotcloud/docker/utils"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -217,7 +217,7 @@ func createVolumes(container *Container) error {
 
 		// Create the mountpoint
 		volPath = filepath.Join(container.basefs, volPath)
-		rootVolPath, err := utils.FollowSymlinkInScope(volPath, container.basefs)
+		rootVolPath, err := fs.FollowSymlinkInScope(volPath, container.basefs)
 		if err != nil {
 			return err
 		}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/dotcloud/docker/archive"
 	"github.com/dotcloud/docker/nat"
+	"github.com/dotcloud/docker/pkg/fs"
 	"github.com/dotcloud/docker/registry"
 	"github.com/dotcloud/docker/runconfig"
 	"github.com/dotcloud/docker/runtime"
@@ -402,7 +403,7 @@ func (b *buildFile) addContext(container *runtime.Container, orig, dest string, 
 	)
 
 	if destPath != container.RootfsPath() {
-		destPath, err = utils.FollowSymlinkInScope(destPath, container.RootfsPath())
+		destPath, err = fs.FollowSymlinkInScope(destPath, container.RootfsPath())
 		if err != nil {
 			return err
 		}
