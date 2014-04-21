@@ -130,6 +130,7 @@ func serveRequest(method, target string, body io.Reader, eng *engine.Engine, t *
 	return r
 }
 
+// FIXME: make this reusable across tests
 func tmpEngine(t *testing.T) *engine.Engine {
 	tmp, err := utils.TestDirectory("")
 	if err != nil {

@@ -1074,7 +1074,7 @@ func (cli *DockerCli) CmdPush(args ...string) error {
 }
 
 func (cli *DockerCli) CmdPull(args ...string) error {
-	cmd := cli.Subcmd("pull", "NAME[:TAG]", "Pull an image or a repository from the registry")
+	cmd := cli.Subcmd("pull", "NAME", "Pull an image")
 	tag := cmd.String([]string{"#t", "#-tag"}, "", "Download tagged image in repository")
 	if err := cmd.Parse(args); err != nil {
 		return nil
@@ -1085,6 +1085,8 @@ func (cli *DockerCli) CmdPull(args ...string) error {
 		return nil
 	}
 
+	/*
+	name := cmd.Arg(0)
 	remote, parsedTag := utils.ParseRepositoryTag(cmd.Arg(0))
 	if *tag == "" {
 		*tag = parsedTag
@@ -1095,6 +1097,7 @@ func (cli *DockerCli) CmdPull(args ...string) error {
 	if err != nil {
 		return err
 	}
+	*/
 
 	cli.LoadConfigFile()
 
@@ -1102,7 +1105,6 @@ func (cli *DockerCli) CmdPull(args ...string) error {
 	authConfig := cli.configFile.ResolveAuthConfig(hostname)
 	v := url.Values{}
 	v.Set("fromImage", remote)
-	v.Set("tag", *tag)
 
 	pull := func(authConfig registry.AuthConfig) error {
 		buf, err := json.Marshal(authConfig)

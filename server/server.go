@@ -82,6 +82,9 @@ func InitServer(job *engine.Job) engine.Status {
 	job.Eng.Hack_SetGlobalVar("httpapi.server", srv)
 	job.Eng.Hack_SetGlobalVar("httpapi.runtime", srv.runtime)
 
+	// "getimage"
+	srv.Runtime.Repositories().Install(eng)
+
 	// FIXME: 'insert' is deprecated and should be removed in a future version.
 	for name, handler := range map[string]engine.Handler{
 		"export":           srv.ContainerExport,
@@ -96,6 +99,7 @@ func InitServer(job *engine.Job) engine.Status {
 		"commit":           srv.ContainerCommit,
 		"info":             srv.DockerInfo,
 		"container_delete": srv.ContainerDestroy,
+		"cmd":              srv.ContainerCmd,
 		"image_export":     srv.ImageExport,
 		"images":           srv.Images,
 		"history":          srv.ImageHistory,
@@ -1378,6 +1382,58 @@ func (srv *Server) poolRemove(kind, key string) error {
 	return nil
 }
 
+func (srv *Server) ImagePull2(job *engine.Job) engine.Status {
+	if len(job.Args) != 2 {
+		return job.Errorf("Usage: %s NAME", job.Name)
+	}
+
+
+	image, err := b.runtime.Repositories().LookupImage(name)
+	if err != nil {
+		if graph.IsNotExist(err) {
+			remote, tag := utils.ParseRepositoryTag(name)
+			pullRegistryAuth := b.authConfig
+			if len(b.configFile.Configs) > 0 {
+				// The request came with a full auth config file, we prefer to use that
+				endpoint, _, err := registry.ResolveRepositoryName(remote)
+				if err != nil {
+					return err
+				}
+				resolvedAuth := b.configFile.ResolveAuthConfig(endpoint)
+				pullRegistryAuth = &resolvedAuth
+			}
+			job := b.srv.Eng.Job("pull", remote, tag)
+			job.SetenvBool("json", b.sf.Json())
+			job.SetenvBool("parallel", true)
+			job.SetenvJson("authConfig", pullRegistryAuth)
+			job.Stdout.Add(b.outOld)
+			if err := job.Run(); err != nil {
+				return err
+			}
+			image, err = b.runtime.Repositories().LookupImage(name)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
+
+	remote, tag := utils.ParseRepositoryTag(name)
+	pullRegistryAuth := b.authConfig
+	if len(b.configFile.Configs) > 0 {
+		// The request came with a full auth config file, we prefer to use that
+		endpoint, _, err := registry.ResolveRepositoryName(remote)
+		if err != nil {
+			return err
+		}
+		resolvedAuth := b.configFile.ResolveAuthConfig(endpoint)
+		pullRegistryAuth = &resolvedAuth
+	}
+}
+
+
 func (srv *Server) ImagePull(job *engine.Job) engine.Status {
 	if n := len(job.Args); n != 1 && n != 2 {
 		return job.Errorf("Usage: %s IMAGE [TAG]", job.Name)
@@ -1745,7 +1801,7 @@ func (srv *Server) ContainerCreate(job *engine.Job) engine.Status {
 	}
 	container, buildWarnings, err := srv.runtime.Create(config, name)
 	if err != nil {
-		if srv.runtime.Graph().IsNotExist(err) {
+		if graph.IsNotExist(err) {
 			_, tag := utils.ParseRepositoryTag(config.Image)
 			if tag == "" {
 				tag = graph.DEFAULTTAG
@@ -2039,38 +2095,6 @@ func (srv *Server) canDeleteImage(imgID string) error {
 	return nil
 }
 
-func (srv *Server) ImageGetCached(imgID string, config *runconfig.Config) (*image.Image, error) {
-	// Retrieve all images
-	images, err := srv.runtime.Graph().Map()
-	if err != nil {
-		return nil, err
-	}
-
-	// Store the tree in a map of map (map[parentId][childId])
-	imageMap := make(map[string]map[string]struct{})
-	for _, img := range images {
-		if _, exists := imageMap[img.Parent]; !exists {
-			imageMap[img.Parent] = make(map[string]struct{})
-		}
-		imageMap[img.Parent][img.ID] = struct{}{}
-	}
-
-	// Loop on the children of the given image and check the config
-	var match *image.Image
-	for elem := range imageMap[imgID] {
-		img, err := srv.runtime.Graph().Get(elem)
-		if err != nil {
-			return nil, err
-		}
-		if runconfig.Compare(&img.ContainerConfig, config) {
-			if match == nil || match.Created.Before(img.Created) {
-				match = img
-			}
-		}
-	}
-	return match, nil
-}
-
 func (srv *Server) RegisterLinks(container *runtime.Container, hostConfig *runconfig.HostConfig) error {
 	runtime := srv.runtime
 
@@ -2101,6 +2125,140 @@ func (srv *Server) RegisterLinks(container *runtime.Container, hostConfig *runco
 	}
 	return nil
 }
+
+// ContainerCmd changes the default command of a container. This affects
+// all future calls to START for this container.
+func (srv *Server) ContainerCmd(job *engine.Job) engine.Status {
+	if len(job.Args) < 1 {
+		return job.Errorf("usage: %s CONTAINER [CMD [ARG...]]", job.Name)
+	}
+	var (
+		name	= job.Args[0]
+		c	= srv.runtime.Get(name)
+		cmdPath string
+		cmdArgs []string
+	)
+	if c == nil {
+		return job.Errorf("No such container: %s", name)
+	}
+	if len(job.Args) >= 2 {
+		cmdPath = job.Args[1]
+	}
+	if len(job.Args) >= 3 {
+		cmdArgs = job.Args[2:]
+	}
+	c.Lock()
+	defer c.Unlock()
+	c.Path = cmdPath
+	c.Args = cmdArgs
+	if err := c.ToDisk(); err != nil {
+		return job.Errorf("%v\n", err)
+	}
+	return engine.StatusOK
+}
+
+func (srv *Server) ContainerAdd(job *engine.Job) engine.Status {
+	if len(job.Args) < 2 {
+		return job.Errorf("usage: %s CONTAINER DESTPATH", job.Name)
+	}
+	var (
+		name	= job.Args[0]
+		dest	= job.Args[1]
+		untar	= job.GetenvBool("untar")
+	)
+	container := srv.runtime.Get(name)
+	if container == nil {
+		return job.Errorf("No such container: %s", name)
+	}
+	destPath := path.Join(container.RootfsPath(), dest)
+	if destPath != container.RootfsPath() {
+		destPath, err = fs.FollowSymlinkInScope(destPath, container.RootfsPath())
+		if err != nil {
+			return job.Errorf("%v", err)
+		}
+	}
+	// Preserve the trailing '/'
+	if strings.HasSuffix(dest, "/") {
+		destPath = destPath + "/"
+	}
+	if untar {
+		// FIXME: TarOptions is a useless indirection. Just pass those
+		// 2 arguments directly! -- Solomon
+		opts := &archive.TarOptions{Compression: archive.Uncompressed}
+		if err := archive.Untar(job.Stdin, destPath, uselessOpts}); err != nil {
+			return job.Errorf("%v", err)
+		}
+	} else {
+		if _, err := utils.CopyToFile(job.Stdin, destPath); err != nil {
+			return job.Errorf("%v", err)
+		}
+	}
+	if job.Env().Exists("chown") {
+		if err := job.Eng.Job("chown", name, destPath, job.Getenv("chown")); err != nil {
+			return job.Errorf("chown: %v", err)
+		}
+	}
+}
+
+func (srv *Server) ChontainerChown(job *engine.Job) engine.Status {
+	if len(job.Args) != 3 {
+		return job.Errorf("usage: %s CONTAINER PATH UID[:GID]", job.Name)
+	}
+	var (
+		name	= job.Args[0]
+		dst	= job.Args[1]
+	)
+	uid, gid, err := parseUidGid(chown)
+	if err != nil {
+		return job.Errorf("%v", err)
+	}
+	c := srv.runtime.Get(name)
+	if c == nil {
+		return job.Errorf("No such container: %s", name)
+	}
+	destPath := path.Join(c.RootfsPath(), dst)
+	// FIXME: repetitive preparation of a path relative to a container
+	// should take place in a container method.
+	if destPath != container.RootfsPath() {
+		destPath, err = utils.FollowSymlinkInScope(destPath, c.RootfsPath())
+		if err != nil {
+			return job.Errorf("%v", err)
+		}
+	}
+	err = filepath.Walk(destPath, func(path string, info os.FileInfo, err error) error {
+		if err := os.Lchown(path, uid, gid); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return job.Errorf("%v", err)
+	}
+	return engine.StatusOK
+}
+
+func parseUidGid(s string) (int, int, error) {
+	parts := strings.SplitN(s, ":", 2)
+	var (
+		uid int
+		gid int
+		err error
+	)
+	uid, err = strconv.ParseInt(parts[0], 8, 32)
+	if err != nil {
+		return 0, 0, err
+	}
+i	if len(parts) >= 2 {
+		gid, err = strconv.ParseInt(parts[1], 8, 32)
+		if err != nil {
+			return 0, 0, err
+		}
+	} else {
+		gid = uid
+	}
+	return uid, gid, nil
+}
+
 
 func (srv *Server) ContainerStart(job *engine.Job) engine.Status {
 	if len(job.Args) < 1 {
@@ -2213,6 +2371,8 @@ func (srv *Server) ContainerResize(job *engine.Job) engine.Status {
 	return job.Errorf("No such container: %s", name)
 }
 
+// FIXME: combining 'logs' and 'stream' does not guarantee getting all
+// the output bytes.
 func (srv *Server) ContainerAttach(job *engine.Job) engine.Status {
 	if len(job.Args) != 1 {
 		return job.Errorf("Usage: %s CONTAINER\n", job.Name)

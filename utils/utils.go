@@ -1010,6 +1010,11 @@ func CopyFile(src, dst string) (int64, error) {
 		return 0, err
 	}
 	defer sf.Close()
+	return CopyToFile(sf, dst)
+}
+
+func CopyToFile(src io.Reader, dst string) (int64, error) {
+	// FIXME: this is racy. Replace with open + O_TRUNC
 	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
 		return 0, err
 	}

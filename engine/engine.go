@@ -33,6 +33,13 @@ func unregister(name string) {
 	delete(globalHandlers, name)
 }
 
+// Installer is a standard interface for objects which can "install" themselves
+// on an engine by registering handlers.
+// This can be used as an entrypoint for external plugins etc.
+type Installer interface {
+	Install(*Engine) error
+}
+
 // The Engine is the core of Docker.
 // It acts as a store for *containers*, and allows manipulation of these
 // containers by executing *jobs*.
@@ -98,7 +105,7 @@ func New(root string) (*Engine, error) {
 		Stdin:    os.Stdin,
 	}
 	eng.Register("commands", func(job *Job) Status {
-		for _, name := range eng.commands() {
+		for _, name := range eng.Commands() {
 			job.Printf("%s\n", name)
 		}
 		return StatusOK
@@ -116,13 +123,19 @@ func (eng *Engine) String() string {
 
 // Commands returns a list of all currently registered commands,
 // sorted alphabetically.
-func (eng *Engine) commands() []string {
+func (eng *Engine) Commands() []string {
 	names := make([]string, 0, len(eng.handlers))
 	for name := range eng.handlers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Exists returns true if the a handler is registered at name.
+func (eng *Engine) Exists(name string) bool {
+	_, exists := eng.handlers[name]
+	return exists
 }
 
 // Job creates a new job which can later be executed.

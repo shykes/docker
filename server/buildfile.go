@@ -12,6 +12,7 @@ import (
 	"github.com/dotcloud/docker/runconfig"
 	"github.com/dotcloud/docker/runtime"
 	"github.com/dotcloud/docker/utils"
+	"github.com/dotcloud/docker/engine"
 	"io"
 	"io/ioutil"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -35,6 +37,7 @@ type BuildFile interface {
 }
 
 type buildFile struct {
+	eng	*engine.Engine
 	runtime *runtime.Runtime
 	srv     *Server
 
@@ -65,53 +68,35 @@ type buildFile struct {
 
 func (b *buildFile) clearTmp(containers map[string]struct{}) {
 	for c := range containers {
-		tmp := b.runtime.Get(c)
-		if err := b.runtime.Destroy(tmp); err != nil {
+		if err := b.eng.Job("destroy", c).Run(); err != nil {
 			fmt.Fprintf(b.outStream, "Error removing intermediate container %s: %s\n", utils.TruncateID(c), err.Error())
 		} else {
 			delete(containers, c)
-			fmt.Fprintf(b.outStream, "Removing intermediate container %s\n", utils.TruncateID(c))
+			fmt.Fprintf(b.outStream, "Removed intermediate container %s\n", utils.TruncateID(c))
 		}
 	}
 }
 
 func (b *buildFile) CmdFrom(name string) error {
-	image, err := b.runtime.Repositories().LookupImage(name)
+	// YOU ARE HERE: convert this to jobs
+	lookup := b.eng.Job("getimage", name)
+	lookup.SetenvBool("autopull", true ) // auto-pull the image if it doesn't exist.
+	lookup.SetenvJson("auth", b.configFile)
+	img, err := lookup.Stdout.AddEnv()
 	if err != nil {
-		if b.runtime.Graph().IsNotExist(err) {
-			remote, tag := utils.ParseRepositoryTag(name)
-			pullRegistryAuth := b.authConfig
-			if len(b.configFile.Configs) > 0 {
-				// The request came with a full auth config file, we prefer to use that
-				endpoint, _, err := registry.ResolveRepositoryName(remote)
-				if err != nil {
-					return err
-				}
-				resolvedAuth := b.configFile.ResolveAuthConfig(endpoint)
-				pullRegistryAuth = &resolvedAuth
-			}
-			job := b.srv.Eng.Job("pull", remote, tag)
-			job.SetenvBool("json", b.sf.Json())
-			job.SetenvBool("parallel", true)
-			job.SetenvJson("authConfig", pullRegistryAuth)
-			job.Stdout.Add(b.outOld)
-			if err := job.Run(); err != nil {
-				return err
-			}
-			image, err = b.runtime.Repositories().LookupImage(name)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+		return err
 	}
-	b.image = image.ID
-	b.config = &runconfig.Config{}
-	if image.Config != nil {
-		b.config = image.Config
+	if err := lookup.Run(); err != nil {
+		return err
+	}
+	b.image = img.Get("id")
+	if img.Exists("config") {
+		b.config = &runconfig.Config{}
+		img.GetJson("config", b.config)
 	}
 	if b.config.Env == nil || len(b.config.Env) == 0 {
+		// FIXME: it doesn't feel right accessing runtime-specific values like DefaultPathEnv
+		// in 'docker build'.
 		b.config.Env = append(b.config.Env, "HOME=/", "PATH="+runtime.DefaultPathEnv)
 	}
 	// Process ONBUILD triggers if they exist
@@ -162,12 +147,16 @@ func (b *buildFile) CmdMaintainer(name string) error {
 // is any error, it returns `(false, err)`.
 func (b *buildFile) probeCache() (bool, error) {
 	if b.utilizeCache {
-		if cache, err := b.srv.ImageGetCached(b.image, b.config); err != nil {
+		getcached := b.eng.Job("image_byparent", b.image)
+		getcached.SetenvJson("config", b.config)
+		var cacheID string
+		getcached.Stdout.AddString(&cacheID)
+		if err := getcached.Run(); err != nil {
 			return false, err
-		} else if cache != nil {
+		} else if cacheID != "" {
 			fmt.Fprintf(b.outStream, " ---> Using cache\n")
 			utils.Debugf("[BUILDER] Use cached version")
-			b.image = cache.ID
+			b.image = cacheID
 			return true, nil
 		} else {
 			utils.Debugf("[BUILDER] Cache miss")
@@ -201,20 +190,61 @@ func (b *buildFile) CmdRun(args string) error {
 		return nil
 	}
 
-	c, err := b.create()
-	if err != nil {
+	// Create the container
+	create := b.eng.Job("create")
+	var id string
+	create.Stdout.AddString(&id)
+	create.Stderr.Add(b.outStream)
+	if err := create.Env().Import(b.config); err != nil {
 		return err
 	}
-	// Ensure that we keep the container mounted until the commit
-	// to avoid unmounting and then mounting directly again
-	c.Mount()
-	defer c.Unmount()
-
-	err = b.run(c)
-	if err != nil {
+	if err := create.Run(); err != nil {
 		return err
 	}
-	if err := b.commit(c.ID, cmd, "run"); err != nil {
+	// override the entry point that may have been picked up from the base image
+	// FIXME: this is a hack to workaround the brittle "mergeconfig" logic.
+	// The solution is to get rid of mergeconfig altogether, in favor of explicit
+	// changes using the Dockerfile syntax.
+	if err := b.eng.Job("cmd", append([]string{id}, b.config.Cmd...)...).Run(); err != nil {
+		return err
+	}
+	b.tmpContainers[id] = struct{}{}
+	// Attach to the container in verbose mode
+	if b.verbose {
+		attach := b.eng.Job("attach", id)
+		attach.SetenvBool("stream", true)
+		attach.SetenvBool("stdout", true)
+		attach.Stdout.Add(b.outStream)
+		attach.SetenvBool("stderr", true)
+		attach.Stderr.Add(b.errStream)
+	}
+	// Start the container
+	if err := b.eng.Job("start", id).Run(); err != nil {
+		return err
+	}
+	// Wait for the container to finish
+	// FIXME: this is racy, because the container could have been start/stopped
+	// any number of times from another caller in between our "start" and "wait"
+	// calls. We need an atomic start+wait call.
+	var status string
+	wait := b.eng.Job("wait", id)
+	wait.Stdout.AddString(&status)
+	if err := wait.Run(); err != nil {
+		return err
+	}
+	if status != "0" {
+		// FIXME: why do we need this weird custom error? -- Solomon
+		ret, err := strconv.ParseInt(status, 10, 32)
+		if err != nil {
+			ret = 1
+		}
+		return &utils.JSONError{
+			Message: fmt.Sprintf("The command %v returned a non-zero code: %d", b.config.Cmd, ret),
+			Code:    int(ret),
+		}
+	}
+	// Commit the image
+	if err := b.commit(id, cmd, "run"); err != nil {
 		return err
 	}
 
@@ -394,15 +424,25 @@ func (b *buildFile) checkPathForAddition(orig string) error {
 	return nil
 }
 
+// FIXME: extract the container-facing part to a job?
+// Job("fs_untar", containername, despath)
+//	-> tar stream in stdin
+//	-> mode + ownership in env
+// Or if we dont want to untar:
+// Job("fs_write", containername, destpath) (content
+//	-> file content in stdin
+//	-> mode + ownership in env
 func (b *buildFile) addContext(container *runtime.Container, orig, dest string, remote bool) error {
+
+	add := eng.Job("add", id, dest)
+
 	var (
 		err      error
 		origPath = path.Join(b.contextPath, orig)
-		destPath = path.Join(container.RootfsPath(), dest)
 	)
 
 	if destPath != container.RootfsPath() {
-		destPath, err = utils.FollowSymlinkInScope(destPath, container.RootfsPath())
+		destPath, err = fs.FollowSymlinkInScope(destPath, container.RootfsPath())
 		if err != nil {
 			return err
 		}
@@ -438,6 +478,9 @@ func (b *buildFile) addContext(container *runtime.Container, orig, dest string, 
 		}
 		return nil
 	}
+
+
+	// -> YOU ARE HERE
 
 	// First try to unpack the source as an archive
 	// to support the untar feature we need to clean up the path a little bit
@@ -610,17 +653,18 @@ func (b *buildFile) CmdAdd(args string) error {
 	}
 
 	// Create the container and start it
-	container, _, err := b.runtime.Create(b.config, "")
-	if err != nil {
+	create := job.Eng.Job("create")
+	if err := create.Env().Import(b.config); err != nil {
+		return err
+	}
+	if err := job.Run(); err != nil {
 		return err
 	}
 	b.tmpContainers[container.ID] = struct{}{}
 
-	if err := container.Mount(); err != nil {
-		return err
-	}
-	defer container.Unmount()
 
+	//// --> YOU ARE HERE
+	// Does addContext depend on runtime or srv? How do we convert it to a job?
 	if err := b.addContext(container, origPath, destPath, isRemote); err != nil {
 		return err
 	}
@@ -703,38 +747,32 @@ func (b *buildFile) commit(id string, autoCmd []string, comment string) error {
 		if hit {
 			return nil
 		}
-
-		container, warnings, err := b.runtime.Create(b.config, "")
-		if err != nil {
+		create := job.Eng.Job("create")
+		create.Stdout.AddString(&id)
+		job.Stderr.Add(b.outStream)
+		if err := create.Env().Import(b.config); err != nil {
 			return err
 		}
-		for _, warning := range warnings {
-			fmt.Fprintf(b.outStream, " ---> [Warning] %s\n", warning)
-		}
-		b.tmpContainers[container.ID] = struct{}{}
-		fmt.Fprintf(b.outStream, " ---> Running in %s\n", utils.TruncateID(container.ID))
-		id = container.ID
-
-		if err := container.Mount(); err != nil {
+		if err := create.Run(); err != nil {
 			return err
 		}
-		defer container.Unmount()
+		b.tmpContainers[id] = struct{}{}
+		fmt.Fprintf(b.outStream, " ---> Running in %s\n", utils.TruncateID(id))
 	}
-	container := b.runtime.Get(id)
-	if container == nil {
-		return fmt.Errorf("An error occured while creating the container")
-	}
-
 	// Note: Actually copy the struct
 	autoConfig := *b.config
 	autoConfig.Cmd = autoCmd
 	// Commit the container
-	image, err := b.runtime.Commit(container, "", "", "", b.maintainer, &autoConfig)
-	if err != nil {
+	var imageID string
+	commit := job.Eng.Job("commit", id)
+	commit.Setenv("author", b.maintainer)
+	commit.SetenvJson("config", &autoConfig)
+	commit.Stdout.AddString(&imageID)
+	if err := commit.Run(); err != nil {
 		return err
 	}
-	b.tmpImages[image.ID] = struct{}{}
-	b.image = image.ID
+	b.tmpImages[imageID] = struct{}{}
+	b.image = imageID
 	return nil
 }
 

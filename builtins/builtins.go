@@ -5,6 +5,7 @@ import (
 	"github.com/dotcloud/docker/engine"
 	"github.com/dotcloud/docker/runtime/networkdriver/bridge"
 	"github.com/dotcloud/docker/server"
+	"github.com/dotcloud/docker/graph"
 )
 
 func Register(eng *engine.Engine) {
