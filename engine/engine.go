@@ -119,6 +119,14 @@ func New(root string) (*Engine, error) {
 	return eng, nil
 }
 
+// Nuke destroys the contents of the engine root on the filesystem.
+func (eng *Engine) Nuke() error {
+	// FIXME: this is needed for unit tests which create temporary engines.
+	// We don't even need a root directory in the first place. We should remove
+	// the Engine.root field altogether, and Nuke along with it.
+	return os.RemoveAll(eng.Root())
+}
+
 func (eng *Engine) String() string {
 	return fmt.Sprintf("%s|%s", eng.Root(), eng.id[:8])
 }
@@ -149,6 +157,8 @@ func (eng *Engine) Job(name string, args ...string) *Job {
 	if eng.Logging {
 		job.Stderr.Add(utils.NopWriteCloser(eng.Stderr))
 	}
+	// Always parse stdout for a structured output.
+	// ignore AddEnv errors: it can't fail and should return an error.
 	handler, exists := eng.handlers[name]
 	if exists {
 		job.handler = handler

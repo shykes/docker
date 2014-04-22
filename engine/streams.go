@@ -211,6 +211,7 @@ func (o *Output) AddEnv() (dst *Env, err error) {
 		decoder := NewDecoder(src)
 		for {
 			env, err := decoder.Decode()
+			fmt.Printf("[addenv] decode = %v %v\n", env, err)
 			if err != nil {
 				return
 			}

@@ -1,10 +1,6 @@
 package daemon
 
-import (
-	"github.com/dotcloud/docker/utils"
-)
-
 type Server interface {
-	LogEvent(action, id, from string) *utils.JSONMessage
+	LogEvent(action, id, from string)
 	IsRunning() bool // returns true if the server is currently in operation
 }

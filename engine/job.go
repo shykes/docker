@@ -32,6 +32,10 @@ type Job struct {
 	status  Status
 	end     time.Time
 	onExit  []func()
+	// If true, Run will parse stdout for a structure message,
+	// and store it in the result field.
+	parseResult	bool
+	result	*Env
 }
 
 type Status int
@@ -46,6 +50,9 @@ const (
 // If the job returns a failure status, an error is returned
 // which includes the status.
 func (job *Job) Run() error {
+	if job.parseResult {
+		job.result, _ = job.Stdout.AddEnv()
+	}
 	// FIXME: make this thread-safe
 	// FIXME: implement wait
 	if !job.end.IsZero() {
@@ -96,6 +103,11 @@ func (job *Job) StatusString() string {
 	return fmt.Sprintf(" = %s (%d)", okerr, job.status)
 }
 
+func (job *Job) ParseResult() *Job {
+	job.parseResult = true
+	return job
+}
+
 // String returns a human-readable description of `job`
 func (job *Job) String() string {
 	return fmt.Sprintf("%s.%s%s", job.Eng, job.CallString(), job.StatusString())
@@ -117,8 +129,9 @@ func (job *Job) GetenvBool(key string) (value bool) {
 	return job.env.GetBool(key)
 }
 
-func (job *Job) SetenvBool(key string, value bool) {
+func (job *Job) SetenvBool(key string, value bool) *Job {
 	job.env.SetBool(key, value)
+	return job
 }
 
 func (job *Job) GetenvSubEnv(key string) *Env {
@@ -137,12 +150,14 @@ func (job *Job) GetenvInt(key string) int {
 	return job.env.GetInt(key)
 }
 
-func (job *Job) SetenvInt64(key string, value int64) {
+func (job *Job) SetenvInt64(key string, value int64) *Job {
 	job.env.SetInt64(key, value)
+	return job
 }
 
-func (job *Job) SetenvInt(key string, value int) {
+func (job *Job) SetenvInt(key string, value int) *Job {
 	job.env.SetInt(key, value)
+	return job
 }
 
 // Returns nil if key not found
@@ -162,8 +177,9 @@ func (job *Job) SetenvList(key string, value []string) error {
 	return job.env.SetJson(key, value)
 }
 
-func (job *Job) Setenv(key, value string) {
+func (job *Job) Setenv(key, value string) *Job {
 	job.env.Set(key, value)
+	return job
 }
 
 // DecodeEnv decodes `src` as a json dictionary, and adds
