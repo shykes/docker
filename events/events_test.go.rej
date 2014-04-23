@@ -1,0 +1,17 @@
+***************
+*** 83,89 ****
+  	// The solution is to implement synchronization in the "events"
+  	// call, for example by having it send a response stream with
+  	// the events, and have the caller wait for that.
+- 	time.Sleep(100 * time.Millisecond)
+  	eng.Job("logevent", "action1", "foo", "TestLogEvent").Run()
+  	// Let's approximate a long-running command
+  	time.Sleep(100 * time.Millisecond)
+--- 94,100 ----
+  	// The solution is to implement synchronization in the "events"
+  	// call, for example by having it send a response stream with
+  	// the events, and have the caller wait for that.
++ 	//time.Sleep(100 * time.Millisecond)
+  	eng.Job("logevent", "action1", "foo", "TestLogEvent").Run()
+  	// Let's approximate a long-running command
+  	time.Sleep(100 * time.Millisecond)

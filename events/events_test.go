@@ -29,6 +29,19 @@ func TestLogEvent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
+	// The sender will write a leading " " to indicate that it can
+	// receive messages. This is a hack, see comments in events.Logger.Events
+	// for the longer-term solution.
+	peek := make([]byte, 1)
+	if n, err := streams.Read(peek); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatalf("%d", n)
+	} else if string(peek) != " " {
+		t.Fatalf("%#v", peek)
+	}
+	fmt.Printf("messages ok: '%#v'\n", peek)
+	// At this point we should receive all new events.
 	waitquery := make(chan bool)
 	var n int
 	go func() {
@@ -83,16 +96,13 @@ func TestLogEvent(t *testing.T) {
 	// The solution is to implement synchronization in the "events"
 	// call, for example by having it send a response stream with
 	// the events, and have the caller wait for that.
-	time.Sleep(1000 * time.Millisecond)
+	//time.Sleep(1000 * time.Millisecond)
 	eng.Job("logevent", "action1", "foo", "TestLogEvent").Run()
 	// Let's approximate a long-running command
 	time.Sleep(100 * time.Millisecond)
 	eng.Job("logevent", "action2", "bar", "TestLogEvent").Run()
-	// Send an event with another FROM than TestLogEvent.
-	// Make sure it is not received.
-	eng.Job("logevent", "some other action", "naz", "another source").Run()
 	eng.Job("logevent", "action3", "something with spaces", "TestLogEvent").Run()
-	timeout := time.After(1 * time.Second)
+	timeout := time.After(3 * time.Second)
 	select {
 	case <-timeout:
 		t.Fatalf("timeout")
