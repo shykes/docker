@@ -2,10 +2,11 @@ package events
 
 import (
 	"encoding/json"
-	"github.com/dotcloud/docker/engine"
 	"io"
 	"testing"
 	"time"
+
+	"github.com/dotcloud/docker/engine"
 )
 
 func TestLogEvent(t *testing.T) {
@@ -13,7 +14,7 @@ func TestLogEvent(t *testing.T) {
 	if err := NewLogger().Install(eng); err != nil {
 		t.Fatal(err)
 	}
-	events := eng.Job("events", "TestLogEvent")
+	events := eng.Job("events")
 	streams, err := events.Stdout.AddPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -54,13 +55,13 @@ func TestLogEvent(t *testing.T) {
 			if !ok {
 				t.Fatalf("%v", e)
 			}
-			if from != "TestLogEvent" {
+			if from != "TestLogEvent" && from != "another source" {
 				t.Fatalf("%v", e)
 			}
 			if action == "wrong_action" {
 				t.Fatalf("%v", e)
 			}
-			if action != "action1" && action != "action2" && action != "action3" {
+			if action != "action1" && action != "action2" && action != "action3" && action != "some other action" {
 				t.Fatalf("%v", e)
 			}
 			n++
