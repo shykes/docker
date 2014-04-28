@@ -78,6 +78,14 @@ func (job *Job) Run() error {
 	return nil
 }
 
+func (job *Job) RunReceive() (*Env, error) {
+	res, err := job.Stdout.AddEnv()
+	if err != nil {
+		return nil, err
+	}
+	return res, job.Run()
+}
+
 func (job *Job) CallString() string {
 	return fmt.Sprintf("%s(%s)", job.Name, strings.Join(job.Args, ", "))
 }
