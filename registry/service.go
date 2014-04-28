@@ -35,6 +35,7 @@ func (s *Service) Install(eng *engine.Engine) error {
 	eng.Register("auth", s.Auth)
 	eng.Register("search", s.Search)
 	eng.Register("pull", s.Pull)
+	eng.Register("push", s.Pull)
 	return nil
 }
 
@@ -177,6 +178,71 @@ func (s *Service) Pull(job *engine.Job) engine.Status {
 
 	return engine.StatusOK
 }
+
+
+// FIXME: Allow to interrupt current push when new push of same image is done.
+func (s *Service) Push(job *engine.Job) engine.Status {
+	if n := len(job.Args); n != 1 {
+		return job.Errorf("Usage: %s IMAGE", job.Name)
+	}
+	var (
+		localName   = job.Args[0]
+		sf          = utils.NewStreamFormatter(job.GetenvBool("json"))
+		authConfig  = &registry.AuthConfig{}
+		metaHeaders map[string][]string
+	)
+
+	tag := job.Getenv("tag")
+	job.GetenvJson("authConfig", authConfig)
+	job.GetenvJson("metaHeaders", metaHeaders)
+	if _, err := s.poolAdd("push", localName); err != nil {
+		return job.Error(err)
+	}
+	defer s.poolRemove("push", localName)
+
+	// Resolve the Repository name from fqn to endpoint + name
+	hostname, remoteName, err := registry.ResolveRepositoryName(localName)
+	if err != nil {
+		return job.Error(err)
+	}
+
+	endpoint, err := registry.ExpandAndVerifyRegistryUrl(hostname)
+	if err != nil {
+		return job.Error(err)
+	}
+
+	img, err := srv.daemon.Graph().Get(localName)
+	r, err2 := registry.NewRegistry(authConfig, registry.HTTPRequestFactory(metaHeaders), endpoint)
+	if err2 != nil {
+		return job.Error(err2)
+	}
+
+	if err != nil {
+		reposLen := 1
+		if tag == "" {
+			reposLen = len(srv.daemon.Repositories().Repositories[localName])
+		}
+		job.Stdout.Write(sf.FormatStatus("", "The push refers to a repository [%s] (len: %d)", localName, reposLen))
+		// If it fails, try to get the repository
+		if localRepo, exists := srv.daemon.Repositories().Repositories[localName]; exists {
+			if err := s.pushRepository(job.Eng, r, job.Stdout, localName, remoteName, localRepo, tag, sf); err != nil {
+				return job.Error(err)
+			}
+			return engine.StatusOK
+		}
+		return job.Error(err)
+	}
+
+	var token []string
+	job.Stdout.Write(sf.FormatStatus("", "The push refers to an image: [%s]", localName))
+	if _, err := s.pushImage(job.Eng, r, job.Stdout, remoteName, img.ID, endpoint, token, sf); err != nil {
+		return job.Error(err)
+	}
+	return engine.StatusOK
+}
+
+
+
 
 func (s *Service) poolAdd(kind, key string) (chan struct{}, error) {
 	s.Lock()
