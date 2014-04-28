@@ -1,7 +1,10 @@
 package registry
 
 import (
+	"fmt"
 	"github.com/dotcloud/docker/engine"
+	"github.com/dotcloud/docker/utils"
+	"sync"
 )
 
 // Service exposes registry capabilities in the standard Engine
@@ -10,21 +13,28 @@ import (
 //
 //  'auth': Authenticate against the public registry
 //  'search': Search for images on the public registry
-//  'pull': Download images from any registry (TODO)
+//  'pull': Download images from any registry
 //  'push': Upload images to any registry (TODO)
 type Service struct {
+	sync.RWMutex
+	pullingPool map[string]chan struct{}
+	pushingPool map[string]chan struct{}
 }
 
 // NewService returns a new instance of Service ready to be
 // installed no an engine.
 func NewService() *Service {
-	return &Service{}
+	return &Service{
+		pullingPool: make(map[string]chan struct{}),
+		pushingPool: make(map[string]chan struct{}),
+	}
 }
 
 // Install installs registry capabilities to eng.
 func (s *Service) Install(eng *engine.Engine) error {
 	eng.Register("auth", s.Auth)
 	eng.Register("search", s.Search)
+	eng.Register("pull", s.Pull)
 	return nil
 }
 
@@ -101,4 +111,112 @@ func (s *Service) Search(job *engine.Job) engine.Status {
 		return job.Error(err)
 	}
 	return engine.StatusOK
+}
+
+func (s *Service) Pull(job *engine.Job) engine.Status {
+	if n := len(job.Args); n != 1 && n != 2 {
+		return job.Errorf("Usage: %s IMAGE [TAG]", job.Name)
+	}
+	var (
+		localName   = job.Args[0]
+		tag         string
+		sf          = utils.NewStreamFormatter(job.GetenvBool("json"))
+		authConfig  AuthConfig
+		configFile  = &ConfigFile{}
+		metaHeaders map[string][]string
+	)
+	if len(job.Args) > 1 {
+		tag = job.Args[1]
+	}
+
+	job.GetenvJson("auth", configFile)
+	job.GetenvJson("metaHeaders", metaHeaders)
+
+	endpoint, _, err := ResolveRepositoryName(localName)
+	if err != nil {
+		return job.Error(err)
+	}
+	authConfig = configFile.ResolveAuthConfig(endpoint)
+
+	c, err := s.poolAdd("pull", localName+":"+tag)
+	if err != nil {
+		if c != nil {
+			// Another pull of the same repository is already taking place; just wait for it to finish
+			job.Stdout.Write(sf.FormatStatus("", "Repository %s already being pulled by another client. Waiting.", localName))
+			<-c
+			return engine.StatusOK
+		}
+		return job.Error(err)
+	}
+	defer s.poolRemove("pull", localName+":"+tag)
+
+	// Resolve the Repository name from fqn to endpoint + name
+	hostname, remoteName, err := ResolveRepositoryName(localName)
+	if err != nil {
+		return job.Error(err)
+	}
+
+	endpoint, err = ExpandAndVerifyRegistryUrl(hostname)
+	if err != nil {
+		return job.Error(err)
+	}
+
+	r, err := NewRegistry(&authConfig, HTTPRequestFactory(metaHeaders), endpoint)
+	if err != nil {
+		return job.Error(err)
+	}
+
+	if endpoint == IndexServerAddress() {
+		// If pull "index.docker.io/foo/bar", it's stored locally under "foo/bar"
+		localName = remoteName
+	}
+
+	if err = s.pullRepository(job.Eng, r, job.Stdout, localName, remoteName, tag, sf, job.GetenvBool("parallel")); err != nil {
+		return job.Error(err)
+	}
+
+	return engine.StatusOK
+}
+
+func (s *Service) poolAdd(kind, key string) (chan struct{}, error) {
+	s.Lock()
+	defer s.Unlock()
+
+	if c, exists := s.pullingPool[key]; exists {
+		return c, fmt.Errorf("pull %s is already in progress", key)
+	}
+	if c, exists := s.pushingPool[key]; exists {
+		return c, fmt.Errorf("push %s is already in progress", key)
+	}
+
+	c := make(chan struct{})
+	switch kind {
+	case "pull":
+		s.pullingPool[key] = c
+	case "push":
+		s.pushingPool[key] = c
+	default:
+		return nil, fmt.Errorf("Unknown pool type")
+	}
+	return c, nil
+}
+
+func (s *Service) poolRemove(kind, key string) error {
+	s.Lock()
+	defer s.Unlock()
+	switch kind {
+	case "pull":
+		if c, exists := s.pullingPool[key]; exists {
+			close(c)
+			delete(s.pullingPool, key)
+		}
+	case "push":
+		if c, exists := s.pushingPool[key]; exists {
+			close(c)
+			delete(s.pushingPool, key)
+		}
+	default:
+		return fmt.Errorf("Unknown pool type")
+	}
+	return nil
 }
