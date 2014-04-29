@@ -3,10 +3,10 @@ package registry
 import (
 )
 
-func (srv *Server) pushRepository(r *registry.Registry, out io.Writer, localName, remoteName string, localRepo map[string]string, tag string, sf *utils.StreamFormatter) error {
+func (s *Service) pushRepository(r *Registry, out io.Writer, localName, remoteName string, localRepo map[string]string, tag string, sf *utils.StreamFormatter) error {
 	out = utils.NewWriteFlusher(out)
 	utils.Debugf("Local repo: %s", localRepo)
-	imgList, tagsByImage, err := srv.getImageList(localRepo, tag)
+	imgList, tagsByImage, err := s.getImageList(localRepo, tag)
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func (srv *Server) pushRepository(r *registry.Registry, out io.Writer, localName
 			if r.LookupRemoteImage(imgId, ep, repoData.Tokens) {
 				out.Write(sf.FormatStatus("", "Image %s already pushed, skipping", utils.TruncateID(imgId)))
 			} else {
-				if _, err := srv.pushImage(r, out, remoteName, imgId, ep, repoData.Tokens, sf); err != nil {
+				if _, err := s.pushImage(r, out, remoteName, imgId, ep, repoData.Tokens, sf); err != nil {
 					// FIXME: Continue on error?
 					return err
 				}
@@ -85,11 +85,15 @@ func (srv *Server) pushRepository(r *registry.Registry, out io.Writer, localName
 	return nil
 }
 
-func (srv *Server) pushImage(r *registry.Registry, out io.Writer, remote, imgID, ep string, token []string, sf *utils.StreamFormatter) (checksum string, err error) {
+func (s *Service) pushImage(eng *engine.Engine, r *Registry, out io.Writer, remote, imgID, ep string, token []string, sf *utils.StreamFormatter) (checksum string, err error) {
 	out = utils.NewWriteFlusher(out)
-	jsonRaw, err := ioutil.ReadFile(path.Join(srv.daemon.Graph().Root, imgID, "json"))
-	if err != nil {
-		return "", fmt.Errorf("Cannot retrieve the path for {%s}: %s", imgID, err)
+	img, err := eng.Job("image_get", imgID)
+	err != nil {
+		return "", err
+	}
+	jsonRaw := img.Get("json")
+	if jsonRaw == "" {
+		return "", fmt.Errorf("cannot retrieve image raw json")
 	}
 	out.Write(sf.FormatProgress(utils.TruncateID(imgID), "Pushing", nil))
 
@@ -106,6 +110,13 @@ func (srv *Server) pushImage(r *registry.Registry, out io.Writer, remote, imgID,
 		return "", err
 	}
 
+
+	getLayer := eng.Job("image_get_layer", imgID)
+	layerData, err := getLayer.Stdout.AddPipe()
+	if err != nil {
+		return job.Error(err)
+	}
+	getLayer.Stderr.Add(out)
 	layerData, err := srv.daemon.Graph().TempLayerArchive(imgID, archive.Uncompressed, sf, out)
 	if err != nil {
 		return "", fmt.Errorf("Failed to generate layer archive: %s", err)
@@ -131,7 +142,7 @@ func (srv *Server) pushImage(r *registry.Registry, out io.Writer, remote, imgID,
 }
 
 // Retrieve the all the images to be uploaded in the correct order
-func (srv *Server) getImageList(localRepo map[string]string, requestedTag string) ([]string, map[string][]string, error) {
+func (s *Service) getImageList(eng *engine.Engine, localRepo map[string]string, requestedTag string) ([]string, map[string][]string, error) {
 	var (
 		imageList   []string
 		imagesSeen  map[string]bool     = make(map[string]bool)
@@ -146,18 +157,31 @@ func (srv *Server) getImageList(localRepo map[string]string, requestedTag string
 
 		tagsByImage[id] = append(tagsByImage[id], tag)
 
-		for img, err := srv.daemon.Graph().Get(id); img != nil; img, err = img.GetParent() {
+		for {
+			img, err := eng.Job("image_get", id).RunReceive()
 			if err != nil {
 				return nil, nil, err
 			}
-
+			if img.Len() == 0 {
+				break
+			}
 			if imagesSeen[img.ID] {
 				// This image is already on the list, we can ignore it and all its parents
 				break
 			}
-
 			imagesSeen[img.ID] = true
 			imageListForThisTag = append(imageListForThisTag, img.ID)
+			if parentID := img.Get("parent_id"); parentID == "" {
+				break
+			} else {
+				img, err = eng.Job("image_get", parentID)
+				if err != nil {
+					return err
+				}
+				if img.Len() == 0 {
+					break
+				}
+			}
 		}
 
 		// reverse the image list for this tag (so the "most"-parent image is first)

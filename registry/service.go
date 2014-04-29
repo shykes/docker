@@ -211,20 +211,37 @@ func (s *Service) Push(job *engine.Job) engine.Status {
 		return job.Error(err)
 	}
 
-	img, err := srv.daemon.Graph().Get(localName)
+
+	// Check if the image exists
+	img, err := eng.Job("image_get", localName).RunReceive()
+	if err != nil {
+		return job.Error(err)
+	}
 	r, err2 := registry.NewRegistry(authConfig, registry.HTTPRequestFactory(metaHeaders), endpoint)
 	if err2 != nil {
 		return job.Error(err2)
 	}
 
-	if err != nil {
+	if img.Len() == 0 { // empty entry means the image doesn't exist.
 		reposLen := 1
 		if tag == "" {
-			reposLen = len(srv.daemon.Repositories().Repositories[localName])
+			tags, err := job.Eng.Job("image_tags", localName).RunReceiveTable()
+			if err != nil {
+				return err
+			}
+			reposLen = tags.Len()
 		}
 		job.Stdout.Write(sf.FormatStatus("", "The push refers to a repository [%s] (len: %d)", localName, reposLen))
 		// If it fails, try to get the repository
-		if localRepo, exists := srv.daemon.Repositories().Repositories[localName]; exists {
+		// YOU ARE HERE: this requires to look up a 'repo', as opposed to "image_get" which looks up an image
+		// the main difference is that image_get parses the single-string formast, and assumes ":latest" if there is no tag.
+		// So if a repo has 10 tags but no "latest" tags, image_get() would yield an empty result, whereas repo_get would yield
+		if tags, err := job.Eng.Job("image_tags", localName).RunReceiveTable(); err != nil {
+			return err
+		} else if tags.Len() != 0 {
+			// image_tags returns the repo name in "name".
+			// We assume all entries have the same name.
+			localRepo := tags.Data[0].Get("name")
 			if err := s.pushRepository(job.Eng, r, job.Stdout, localName, remoteName, localRepo, tag, sf); err != nil {
 				return job.Error(err)
 			}
@@ -235,7 +252,7 @@ func (s *Service) Push(job *engine.Job) engine.Status {
 
 	var token []string
 	job.Stdout.Write(sf.FormatStatus("", "The push refers to an image: [%s]", localName))
-	if _, err := s.pushImage(job.Eng, r, job.Stdout, remoteName, img.ID, endpoint, token, sf); err != nil {
+	if _, err := s.pushImage(job.Eng, r, job.Stdout, remoteName, img.Get("id"), endpoint, token, sf); err != nil {
 		return job.Error(err)
 	}
 	return engine.StatusOK

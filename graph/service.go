@@ -11,6 +11,7 @@ func (s *TagStore) Install(eng *engine.Engine) error {
 	eng.Register("image_set", s.CmdSet)
 	eng.Register("image_tag", s.CmdTag)
 	eng.Register("image_get", s.CmdGet)
+	eng.Register("image_tags", s.CmdTags)
 	return nil
 }
 
@@ -107,22 +108,65 @@ func (s *TagStore) CmdGet(job *engine.Job) engine.Status {
 		// but we didn't, so now we're doing it here.
 		//
 		// Fields that we're probably better off not including:
-		//	- ID (the caller already knows it, and we stay more flexible on
-		//		naming down the road)
-		//	- Parent. That field is really an implementation detail of
-		//		layer storage ("layer is a diff against this other layer).
-		//		It doesn't belong at the same level as author/description/etc.
+		//   (...edit: but may have to include anyway, to accomodate current code)
 		//	- Config/ContainerConfig. Those structs have the same sprawl problem,
 		//		so we shouldn't include them wholesale either.
 		//	- Comment: initially created to fulfill the "every image is a git commit"
 		//		metaphor, in practice people either ignore it or use it as a
 		//		generic description field which it isn't. On deprecation shortlist.
+		//	- Parent. That field is really an implementation detail of
+		//		layer storage ("layer is a diff against this other layer).
+		//		It doesn't belong at the same level as author/description/etc.
+		res.Set("parent_id", img.Parent)
+		res.Set("id", img.ID)
 		res.Set("created", fmt.Sprintf("%v", img.Created))
 		res.Set("author", img.Author)
 		res.Set("os", img.OS)
 		res.Set("architecture", img.Architecture)
 		res.Set("docker_version", img.DockerVersion)
+		jsonRaw, err := ioutil.ReadFile(path.Join(s.graph.Root, img.ID, "json"))
+		if err != nil {
+			return job.Error(err)
+		}
+		res.Set("json", string(jsonRaw))
 	}
 	res.WriteTo(job.Stdout)
+	return engine.StatusOK
+}
+
+// CmdTags returns a list of tags under a certain name.
+func (s *TagStore) CmdTags(job *engine.Job) engine.Status {
+	if len(job.Args) != 1 {
+		return job.Errorf("usage: %s NAME", job.Name)
+	}
+	repo, err := s.Get(job.Args[0])
+	if err != nil {
+		return job.Error(err)
+	}
+	for tag, id := range repo {
+		e := &engine.Env{}
+		e.Set("name", job.Args[0])
+		e.Set("tag", tag)
+		e.Set("id", id)
+		if err := e.WriteTo(job.Stdout); err != nil {
+			return job.Error(err)
+		}
+	}
+	return engine.StatusOK
+}
+
+func (s *TagStore) CmdGetLayer(job *engine.Job) engine.Status {
+	if len(job.Args) != 1 {
+		return job.Errorf("usage: %s NAME", job.Name)
+	}
+	id := job.Args[0]
+	sf := utils.NewStreamFormatter(false)
+	layerData, err := s.graph.TempLayerArchive(id, archive.Uncompressed, sf, job.Stderr)
+	if err != nil {
+		return job.Error(err)
+	}
+	if err := io.Copy(job.Stdout, layerData); err != nil {
+		return job.Error(err)
+	}
 	return engine.StatusOK
 }
