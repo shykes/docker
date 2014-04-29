@@ -86,6 +86,14 @@ func (job *Job) RunReceive() (*Env, error) {
 	return res, job.Run()
 }
 
+func (job *Job) RunReceiveTable() (*Table, error) {
+	res, err := job.Stdout.AddTable()
+	if err != nil {
+		return nil, err
+	}
+	return res, job.Run()
+}
+
 func (job *Job) CallString() string {
 	return fmt.Sprintf("%s(%s)", job.Name, strings.Join(job.Args, ", "))
 }
