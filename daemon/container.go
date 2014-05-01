@@ -484,7 +484,7 @@ ff02::2		ip6-allrouters
 
 	for linkAlias, child := range children {
 		_, alias := path.Split(linkAlias)
-		hostsContent = append([]byte(fmt.Sprintf("%s\t%s.dockerlocal\n", child.NetworkSettings.IPAddress, alias)), hostsContent...)
+		hostsContent = append([]byte(fmt.Sprintf("%s\t%s\n", child.NetworkSettings.IPAddress, alias)), hostsContent...)
 	}
 
 	container.HostsPath = path.Join(container.root, "hosts")
