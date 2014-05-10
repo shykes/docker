@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/dotcloud/docker/pkg/beam"
+	"github.com/dotcloud/docker/pkg/testutils"
 	"io"
 	"strings"
 	"testing"
@@ -102,21 +103,7 @@ func testRemote(t *testing.T, senderSide, receiverSide func(*Engine)) {
 	receiverSide(receiver.Engine)
 	go receiver.Run()
 
-	timeout(t, func() {
+	testutils.Timeout(t, func() {
 		senderSide(eng)
 	})
-}
-
-func timeout(t *testing.T, f func()) {
-	onTimeout := time.After(100 * time.Millisecond)
-	onDone := make(chan bool)
-	go func() {
-		f()
-		close(onDone)
-	}()
-	select {
-	case <-onTimeout:
-		t.Fatalf("timeout")
-	case <-onDone:
-	}
 }
