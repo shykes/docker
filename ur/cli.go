@@ -30,7 +30,7 @@ func Cli(msg *beam.Message, in beam.Receiver, out beam.Sender) error {
 				return err
 			}
 			val := scanner.Text()
-			out.Send(&beam.Message{"set", []string{key, val}, nil}, 0)
+			out.Send(&beam.Message{"set", []string{key, val}}, 0)
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "[cli] skipping unknown command '%s'\n", msg.Name)
