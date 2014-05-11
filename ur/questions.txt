@@ -1,0 +1,36 @@
+
+## Should beam have a top-level "path" for every message?
+
+Cons:
+	* One more special case
+	* Shouldn't navigation be call-to-call?
+	* Doesn't it conflict with capital-N Names, enforced by crypto etc?
+
+Pros:
+	* With discreet logging, we get a firehose of mixed logging events. We need an
+	identifier to distinguish the sources.
+
+Solution: perhaps every program has a name. Every runtime starts at the special root "/local"
+which is a special case.
+
+Names by definition are federated. The framework can dictate rules for who is allowed to
+use which name... but the rules are enforced by each runtime. A rogue runtime can choose
+to ignore the rules for itself. Or a legitimate runtime can follow the rules, but be
+out of sync with the hub because it only updates once a day. Thus the technical reality is that:
+
+```
+<engine_id_foo>:/ubuntu/cloudimage:14.04
+<engine_id_bar>:/ubuntu/cloudimage:14.04
+```
+
+Might not be the same.
+
+
+
+## Can tags be mutated?
+
+
+## Rename "beam" to "libus" or "libservice"?
+
+	* libservice is a lightweight library for exposing and consuming lightweight network services in a distributed environment
+
