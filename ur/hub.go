@@ -1,68 +1,52 @@
 package ur
 
 import (
+	"fmt"
 	beam "github.com/dotcloud/docker/pkg/beam/inmem"
+	"sync"
 )
 
+// Hub passes messages to dynamically registered handlers.
 type Hub struct {
-	sync.RWMutex
-	handler beam.Sender
+	handlers *beam.StackSender
+	tasks    sync.WaitGroup
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		handler: NopSender{},
+		handlers: beam.NewStackSender(),
 	}
 }
-
-func (hub *Hub) Serve(src beam.Receiver) error {
-	var tasks sync.WaitGroup
-	for {
-		msg, msgr, msgw, err := src.Receive(beam.R|beamW)
-		if err != nil {
-			return err
-		}
-		if msg.Name == "register" {
-			// Requests from the new handler are passed to the next handler
-			go func(nextHandler beam.Sender, msgr beam.Receiver) {
-				beam.Copy(nextHandler, msgr)
-			}(hub.handler, msgr)
-			// Future requests are passed to the current handler.
-			// if the handler stops responding, acquire the lock and 
-			// --> USE A LINKED LIST
-			// AND MAY THE FORCE BE WITH YOU
-		}
-	}
-}
-
 
 func (hub *Hub) Send(msg *beam.Message, mode int) (beam.Receiver, beam.Sender, error) {
 	if msg.Name == "register" {
-		outr, outw := beam.Pipe()
-		inr, inw := beam.Pipe()
-		hub.Lock()
-		defer hub.Unlock()
-		oldHandler := hub.handler
-		hub.handler = inw
+		if mode&beam.R == 0 {
+			return nil, nil, fmt.Errorf("register: no return channel")
+		}
+		fmt.Printf("[hub] received %v\n", msg)
+		hYoutr, hYoutw := beam.Pipe()
+		hYinr, hYinw := beam.Pipe()
+		// Register the new handler on top of the others,
+		// and get a reference to the previous stack of handlers.
+		prevHandlers := hub.handlers.Add(hYinw)
+		// Pass requests from the new handler to the previous chain of handlers
+		// hYout -> hXin
+		hub.tasks.Add(1)
 		go func() {
-			// New messages will arrive through:
-			// hub.handler=inw -> inr -> outw -> outr -> (registered handler)
-			beam.Copy(outw, inr)
-			hub.Lock()
-			defer hub.Unlock
+			defer hub.tasks.Done()
+			beam.Copy(prevHandlers, hYoutr)
+			hYoutr.Close()
 		}()
+		return hYinr, hYoutw, nil
 	}
+	fmt.Printf("sending %#v to %d handlers\n", msg, hub.handlers.Len())
+	return hub.handlers.Send(msg, mode)
 }
 
-
-type NopSender struct {}
-
-func (s NopSender) Send(msg *beam.Message, mode int) (beam.Receiver, beam.Sender, error) {
-	return NopReceiver{}, NopSender{}, nil
+func (hub *Hub) Wait() {
+	hub.tasks.Wait()
 }
 
-type NopReceiver struct{}
-
-func (r NopReceiver) Receive(mode int) (*beam.Message, beam.Receiver, beam.Sender, error) {
-	return nil, nil, nil, io.EOF
+func (hub *Hub) Close() error {
+	return hub.handlers.Close()
 }
