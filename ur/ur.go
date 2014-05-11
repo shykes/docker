@@ -162,7 +162,6 @@ func (s *Service) Prompt(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer r.Close()
 	msg, _, _, err := r.Receive(0)
 	if err != nil {
 		return "", err
@@ -217,7 +216,6 @@ func (s *Service) Auth(id Id) error {
 	if err != nil {
 		return err
 	}
-	defer challenge.Close()
 	msg, _, w, err := challenge.Receive(beam.W)
 	if err != nil {
 		return err
