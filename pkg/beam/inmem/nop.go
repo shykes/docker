@@ -6,8 +6,14 @@ import (
 
 type NopSender struct{}
 
-func (s NopSender) Send(msg *Message, mode int) (Receiver, Sender, error) {
-	return NopReceiver{}, NopSender{}, nil
+func (s NopSender) Send(msg *Message, mode int) (r Receiver, w Sender, err error) {
+	if mode & R != 0 {
+		r = NopReceiver{}
+	}
+	if mode & W != 0 {
+		w = NopSender{}
+	}
+	return
 }
 
 func (s NopSender) Close() error {
