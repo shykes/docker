@@ -3,43 +3,46 @@ package main
 import (
 	beam "github.com/dotcloud/docker/pkg/beam/inmem"
 	"github.com/dotcloud/docker/ur"
-	"fmt"
 	"log"
 	"bufio"
 	"os"
+	"fmt"
+	"strings"
+	"bytes"
 )
 
 func main() {
-	/*
-	p, err := ur.Compile(os.Stdin)
-	if err != nil {
-		log.Fatalf("compile: %s", err)
-	}
-	*/
-	hub := ur.NewHub()
-	// Register handler
-	r, w, err := hub.Send(&beam.Message{"register", nil}, beam.R|beam.W)
-	if err != nil {
-		log.Fatal(err)
-	}
-	go func() {
-		defer w.Close()
-		for {
-			msg, _, _, err := r.Receive(0)
-			if err != nil {
-				log.Fatalf("recv: %v", err)
-			}
-			fmt.Printf("===> %s %s\n", msg.Name, msg.Args)
-			if _, _, err := w.Send(msg, 0); err != nil {
-				log.Fatalf("send: %v", err)
-			}
-		}
-	}()
+	cli := ur.NewHub()
+	cli.RegisterName("", ur.CliLog)
+	cli.RegisterName("print", ur.CliPrint)
+	cli.RegisterName("error", ur.CliError)
+	cli.RegisterName("log", ur.CliLog)
+	rt := ur.NewHub()
+	rt.Register(cli)
+	rt.RegisterName("eval", ur.RuntimeEval)
+	rt.RegisterName("compile", ur.RuntimeCompile)
 	input := bufio.NewScanner(os.Stdin)
-	for input.Scan() {
+	for {
+		fmt.Printf("> ")
+		if !input.Scan() {
+			break
+		}
 		if input.Err() != nil {
 			break
 		}
-		hub.Send(&beam.Message{"log", []string{input.Text()}}, 0)
+		p, err := ur.Compile(strings.NewReader(input.Text()))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "compile error: %v\n", err)
+			continue
+		}
+		bc := new(bytes.Buffer)
+		p.Encode(bc)
+		evalout, _, err := rt.Send(&beam.Message{"eval", []string{bc.String()}}, beam.R)
+		if err != nil {
+			log.Fatal(err)
+		}
+		go beam.Copy(cli, evalout)
 	}
+	rt.Wait()
+	cli.Wait()
 }
