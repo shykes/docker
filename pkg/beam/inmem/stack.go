@@ -37,7 +37,7 @@ func (s *StackSender) Send(msg *Message, mode int) (r Receiver, w Sender, err er
 		return r, w, err
 	}
 	// Silently drop messages if no valid backend is available.
-	return nil, nil, nil
+	return NopSender{}.Send(msg, mode)
 }
 
 func (s *StackSender) Add(dst Sender) *StackSender {
