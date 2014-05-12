@@ -40,7 +40,6 @@ func (hub *Hub) Send(msg *beam.Message, mode int) (beam.Receiver, beam.Sender, e
 		}()
 		return hYinr, hYoutw, nil
 	}
-	fmt.Printf("sending %#v to %d handlers\n", msg, hub.handlers.Len())
 	return hub.handlers.Send(msg, mode)
 }
 

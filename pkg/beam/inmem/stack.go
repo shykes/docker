@@ -26,7 +26,7 @@ func NewStackSender() *StackSender {
 func (s *StackSender) Send(msg *Message, mode int) (r Receiver, w Sender, err error) {
 	completed := s.walk(func(h Sender) (ok bool) {
 		r, w, err = h.Send(msg, mode)
-		fmt.Printf("[stacksender] sending %v to %#v returned %v\n", msg, h, err)
+		//fmt.Printf("[stacksender] sending %v to %#v returned %v\n", msg, h, err)
 		if err == nil {
 			return true
 		}
@@ -47,7 +47,6 @@ func (s *StackSender) Add(dst Sender) *StackSender {
 		stack: list.New(),
 	}
 	prev.stack.PushFrontList(s.stack)
-	fmt.Printf("[ADD] prev %#v\n", prev)
 	s.stack.PushFront(dst)
 	return prev
 }
@@ -67,7 +66,6 @@ func (s *StackSender) _walk(f func(*list.Element) bool) bool {
 	e = s.stack.Front()
 	s.l.RUnlock()
 	for e != nil {
-		fmt.Printf("[StackSender.Walk] %v\n", e.Value.(Sender))
 		s.l.RLock()
 		next := e.Next()
 		s.l.RUnlock()
