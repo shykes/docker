@@ -103,6 +103,10 @@ func (p *Program) String() string {
 	return strings.Join(lines, "\n")
 }
 
+func (p *Program) Instructions() []*Instruction {
+	return p.instructions
+}
+
 func (i *Instruction) String() string {
 	return strings.Join(append([]string{i.Name}, i.Args...), " ")
 }

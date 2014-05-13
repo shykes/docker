@@ -1,6 +1,7 @@
 package ur
 
 import (
+	"bytes"
 	"fmt"
 	beam "github.com/dotcloud/docker/pkg/beam/inmem"
 	"strings"
@@ -35,21 +36,22 @@ func (rt *Runtime) Send(msg *beam.Message, mode int) (beam.Receiver, beam.Sender
 	}
 
 	inr, inw := beam.Pipe()
+	if mode&beam.W == 0 {
+		inw.Close()
+	}
 	outr, outw := beam.Pipe()
-
+	if mode&beam.R == 0 {
+		outr.Close()
+	}
 	go func() {
-		err := h(msg, inr, rt, outw)
+		err := h(msg, inr, outw, rt)
 		// FIXME: implement error passing
 		if err != nil {
 			outw.Send(&beam.Message{"error", []string{err.Error()}, nil}, 0)
 		}
+		outw.Close()
+		inr.Close()
 	}()
-	if mode&beam.R == 0 {
-		outr.Close()
-	}
-	if mode&beam.W == 0 {
-		inw.Close()
-	}
 	return outr, inw, nil
 }
 
@@ -59,14 +61,28 @@ func (rt *Runtime) opNotFound(msg *beam.Message, in beam.Receiver, out beam.Send
 }
 
 func (rt *Runtime) opPrint(msg *beam.Message, in beam.Receiver, out beam.Sender, caller beam.Sender) error {
+	fmt.Printf("---> [print]\n")
+	defer fmt.Printf("---> [/print]\n")
 	fmt.Printf("%s\n", strings.Join(msg.Args, " "))
 	return nil
 }
 
 func (rt *Runtime) opEval(msg *beam.Message, in beam.Receiver, out beam.Sender, caller beam.Sender) error {
-	for _, bc := range msg.Args {
-		cmd := strings.Split(bc, ":")
-		r, w, err := out.Send(&beam.Message{cmd[0], cmd[1:], nil}, beam.R|beam.W)
+	fmt.Printf("--> [eval] %v\n", msg)
+	defer fmt.Printf("---> [/eval]\n")
+	out.Send(&beam.Message{"log", []string{"starting eval"}, nil}, 0)
+	if len(msg.Args) != 1 {
+		return fmt.Errorf("usage: %s BYTECODE", msg.Name)
+	}
+	p := NewProgram()
+	n, err := p.Decode(strings.NewReader(msg.Args[0]))
+	if err != nil {
+		out.Send(&beam.Message{"error", []string{fmt.Sprintf("decode: %v", err)}, nil}, 0)
+		return err
+	}
+	out.Send(&beam.Message{"log", []string{fmt.Sprintf("[eval] parsed %d instructions", n)}, nil}, 0)
+	for _, i := range p.Instructions() {
+		r, w, err := caller.Send(&beam.Message{i.Name, i.Args, nil}, beam.R|beam.W)
 		if err != nil {
 			return err
 		}
@@ -80,6 +96,7 @@ func (rt *Runtime) opEval(msg *beam.Message, in beam.Receiver, out beam.Sender, 
 			beam.Copy(w, in)
 			tasks.Done()
 		}()
+		tasks.Wait()
 	}
 	return nil
 }
@@ -110,8 +127,10 @@ func (s *Service) Stop() error {
 
 }
 
-func (s *Service) Eval(bc string) (*Service, error) {
-	r, w, err := s.Send(&beam.Message{"eval", []string{bc}, nil}, beam.R|beam.W)
+func (s *Service) Eval(p *Program) (*Service, error) {
+	bc := new(bytes.Buffer)
+	p.Encode(bc)
+	r, w, err := s.Send(&beam.Message{"eval", []string{bc.String()}, nil}, beam.R|beam.W)
 	return &Service{r, w}, err
 }
 
