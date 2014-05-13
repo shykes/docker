@@ -1,6 +1,7 @@
 package ur
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/dotcloud/docker/pkg/beam/data"
 	"github.com/flynn/go-shlex"
@@ -19,28 +20,34 @@ type Instruction struct {
 }
 
 func Compile(src io.Reader) (*Program, error) {
-	l, err := shlex.NewLexer(src)
-	if err != nil {
-		return nil, err
-	}
-	// FIXME: this creates a program with a single instruction,
-	// spanning all words parsed from the input.
-	// This is because shlex, as far as I know, does not support newlines.
-	var cmd []string
-	for {
-		word, err := l.NextWord()
-		if err == io.EOF {
-			break
+	p := NewProgram()
+	lines := bufio.NewScanner(src)
+	for lines.Scan() {
+		line := lines.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
+		l, err := shlex.NewLexer(strings.NewReader(line))
 		if err != nil {
 			return nil, err
 		}
-		cmd = append(cmd, word)
+		var cmd []string
+		for {
+			word, err := l.NextWord()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			cmd = append(cmd, word)
+		}
+		if len(cmd) == 0 {
+			return nil, fmt.Errorf("parse error: empty command")
+		}
+		p.Add(cmd[0], cmd[1:]...)
 	}
-	if len(cmd) == 0 {
-		return nil, fmt.Errorf("parse error: empty command")
-	}
-	return NewProgram().Add(cmd[0], cmd[1:]...), nil
+	return p, nil
 }
 
 func NewProgram() *Program {

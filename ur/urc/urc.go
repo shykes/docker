@@ -16,5 +16,5 @@ func main() {
 	if err != nil {
 		log.Fatalf("encode: %s", err)
 	}
-	fmt.Fprintf(os.Stderr, "Encoded %d instructions\n", n)
+	fmt.Fprintf(os.Stderr, "\nEncoded %d instructions\n", n)
 }
