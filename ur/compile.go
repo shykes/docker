@@ -67,7 +67,7 @@ func (p *Program) Decode(bc io.Reader) (int, error) {
 			return 0, err
 		}
 		instructions = append(instructions, inst)
-		data = data[:skip]
+		data = data[skip:]
 	}
 	p.instructions = append(p.instructions, instructions...)
 	return len(instructions), nil
