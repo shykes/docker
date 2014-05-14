@@ -31,6 +31,10 @@ func (rt *Runtime) Send(msg *beam.Message, mode int) (beam.Receiver, beam.Sender
 		h = rt.opEval
 	case "print":
 		h = rt.opPrint
+	case "emit":
+		h = rt.opEmit
+	case "error":
+		h = rt.opError
 	default:
 		h = rt.opNotFound
 	}
@@ -95,6 +99,19 @@ func (rt *Runtime) opEval(msg *beam.Message, in beam.Receiver, out beam.Sender, 
 		tasks.Wait()
 	}
 	return nil
+}
+
+func (rt *Runtime) opError(msg *beam.Message, in beam.Receiver, out beam.Sender, caller beam.Sender) error {
+	out.Send(msg, 0)
+	return nil
+}
+
+func (rt *Runtime) opEmit(msg *beam.Message, in beam.Receiver, out beam.Sender, caller beam.Sender) error {
+	if len(msg.Args) < 1 {
+		return fmt.Errorf("usage: %s OP [ARGS...]", msg.Name)
+	}
+	_, _, err := out.Send(&beam.Message{msg.Args[0], msg.Args[1:], nil}, 0)
+	return err
 }
 
 // A unique identifier for this runtime.

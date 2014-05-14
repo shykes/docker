@@ -1,9 +1,8 @@
 package main
 
 import (
-	"fmt"
+	beam "github.com/dotcloud/docker/pkg/beam/inmem"
 	"github.com/dotcloud/docker/ur"
-	"io"
 	"log"
 	"os"
 )
@@ -20,14 +19,7 @@ func main() {
 		log.Fatalf("eval: %v", err)
 	}
 	eval.Sender.Close()
-	for {
-		msg, _, _, err := eval.Receive(0)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("%v\n", msg)
+	if _, err := beam.Copy(ur.HandlerPipe(ur.Cli), eval.Receiver); err != nil {
+		log.Fatal(err)
 	}
 }
