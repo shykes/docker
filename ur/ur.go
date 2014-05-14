@@ -61,15 +61,11 @@ func (rt *Runtime) opNotFound(msg *beam.Message, in beam.Receiver, out beam.Send
 }
 
 func (rt *Runtime) opPrint(msg *beam.Message, in beam.Receiver, out beam.Sender, caller beam.Sender) error {
-	fmt.Printf("---> [print]\n")
-	defer fmt.Printf("---> [/print]\n")
 	fmt.Printf("%s\n", strings.Join(msg.Args, " "))
 	return nil
 }
 
 func (rt *Runtime) opEval(msg *beam.Message, in beam.Receiver, out beam.Sender, caller beam.Sender) error {
-	fmt.Printf("--> [eval] %v\n", msg)
-	defer fmt.Printf("---> [/eval]\n")
 	out.Send(&beam.Message{"log", []string{"starting eval"}, nil}, 0)
 	if len(msg.Args) != 1 {
 		return fmt.Errorf("usage: %s BYTECODE", msg.Name)
