@@ -1,11 +1,29 @@
-package libnet
+package libtree
 
-type Config struct {
+type UnionTree struct {
 	repo *git.Repo
-	branch string	// The branch name
-	subtree string	// A path relative to t, under which the config is scoped
-	t *git.Commit   // The current snapshot
+	branch string		// The branch name
+	c *git.Commit		// The current commit (can be changed with Prev() and Update())
+	scope string		// A path relative to the committed git tree, under which the config is scoped
+	changes *MemTree	// An in-memory tree with uncommitted changes
 }
+
+
+type GitTree struct {
+	repo *git.Repo
+	branch string
+	c *git.Commit
+	scope string
+}
+
+func (t *GitTree) Clone() *GitTree {
+	return *t
+}
+
+func (t *GitTree) Subtree(path ...string) *GitTree {
+	
+}
+
 
 func (j *Config) Snapshot(hash string) (*Config, error) {
 
@@ -19,7 +37,7 @@ func (j *Config) Commit(desc []string, t *Tree) (string, error) {
 
 }
 
-type Config interface {
+type Tree interface {
 	// Reset uncommitted changes
 	Reset()
 
@@ -29,8 +47,7 @@ type Config interface {
 	// Return the specified sub-tree, creating it if needed
 	Subtree(string) (Config, error)
 
-	GetBlob(string) (string, error)
-	GetBlobDefault(string, string) (string, error)
+	GetBlob(string) (string, bool, error)
 
 	SetBlob(string, string) error
 

@@ -58,7 +58,7 @@ func cmdList(c *cli.Context) {
 }
 
 func cmdConnect(c  *cli.Context) {
-	cfg, err := InitConfig(".git", "dockernet/0.0.1", "/")
+	cfg, err := libgraph.Init(".git", "dockernet/0.0.1", "/")
 	if err != nil {
 		Fatalf("%v", err)
 	}
@@ -127,31 +127,6 @@ func Fatalf(msg string, args ...interface{}) {
 	}
 	fmt.Fprintf(os.Stderr, msg, args...)
 	os.Exit(1)
-}
-
-func NextIP(cfg *Config) (net.IP, *net.IPNet, error) {
-	ipRange, err := snap.GetBlobDefault("iprange", "")
-	if err != nil {
-		return nil, nil, err
-	}
-	if ipRange == "" {
-		// FIXME: auto-detect a default network range
-		ipRange = "10.42.0.0/16"
-	}
-	lastIP, err := snap.GetBlobDefault("lastip", "")
-	if err != nil {
-		return nil, nil, err
-	}
-	var ip string
-	if lastIP == "" {
-		// FIXME: compute first IP of the network range
-		ip = "10.42.0.1/16"
-	} else {
-		// FIXME: increment the lastIP by 1
-		// FIXME: add support for released ranges
-		ip = "10.42.0.42/16"
-	}
-	return net.ParseCIDR(ip)
 }
 
 func allocateIp(cfg *Config, allocPath, dstPath) error {
