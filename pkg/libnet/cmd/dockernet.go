@@ -98,13 +98,18 @@ func cmdConnect(c  *cli.Context) {
 	cfg.SetBlob(path.Join("/scopes", src, "links", name)
 
 	cfg.Commit(func() error {
-		// Conflict resolving handler
+		// Conflict resolving handler.
+		// If this is called, the DB was updated concurrently and could not
+		// be auto-merged.
 		// The only possible conflict is the IP allocation.
 		// In case of a conflict
-
-		// Sleep a random backoff period
-		// Whoever wakes up first wins (or there will be another conflict to handle)
-		time.Sleep(10 * time.Millisecond)
+		if err := cfg.Update(); err != nil {
+			return err
+		}
+		cfg.Reset("/ips")
+		cfg.Reset("/scopes", src, "links", "ip")
+		return allocateIp(cfg, "/ips", path.Join("/scopes", src, "inks", "ip"))
+		
 	})
 
 	// Commit the new configuration
