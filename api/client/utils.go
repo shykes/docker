@@ -61,7 +61,10 @@ func (cli *DockerCli) call(method, path string, data interface{}, passAuthInfo b
 	if err != nil {
 		return nil, -1, err
 	}
+	// NOTE: this is for *REGISTRY* auth info
 	if passAuthInfo {
+		// FIXME: this is really only the "registry auth file"
+		// FIXME: replace this with generic Docker config
 		cli.LoadConfigFile()
 		// Resolve the Auth config relevant for this server
 		authConfig := cli.configFile.ResolveAuthConfig(registry.IndexServerAddress())
@@ -81,6 +84,16 @@ func (cli *DockerCli) call(method, path string, data interface{}, passAuthInfo b
 			}
 		}
 	}
+	// Add JWT token to 1) authenticate and 2) claim authorization for this action
+	// FIXME: JWTs must be scoped to prevent evil re-use
+	// --> At this point we're not sure how to prevent replay.
+	// DECISION: first patch: use libtrust engine key to generate default TLS config
+	// --> authorization only.
+	// --> then add simple ACL, enforced at tls session negotiation
+	// --> even without authorization, use key ID to log actions
+	jwtToken, err := cli.engineKey.GenerateJWT(...)
+
+
 	req.Header.Set("User-Agent", "Docker-Client/"+dockerversion.VERSION)
 	req.URL.Host = cli.addr
 	req.URL.Scheme = cli.scheme

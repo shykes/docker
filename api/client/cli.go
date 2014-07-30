@@ -13,6 +13,7 @@ import (
 	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/term"
 	"github.com/docker/docker/registry"
+	"github.com/docker/docker/pkg/libtrust" // Break it out later
 )
 
 var funcMap = template.FuncMap{
@@ -34,6 +35,7 @@ func (cli *DockerCli) getMethod(name string) (func(...string) error, bool) {
 	return method.Interface().(func(...string) error), true
 }
 
+// FIXME: ParseCommands actually executes commands, maybe rename?
 func (cli *DockerCli) ParseCommands(args ...string) error {
 	if len(args) > 0 {
 		method, exists := cli.getMethod(args[0])
@@ -64,7 +66,8 @@ func (cli *DockerCli) LoadConfigFile() (err error) {
 	return err
 }
 
-func NewDockerCli(in io.ReadCloser, out, err io.Writer, proto, addr string, tlsConfig *tls.Config) *DockerCli {
+// Pass 
+func NewDockerCli(in io.ReadCloser, out, err io.Writer, proto, addr string, tlsConfig *tls.Config, engineKey libtrust.Key) *DockerCli {
 	var (
 		isTerminal = false
 		terminalFd uintptr
@@ -85,7 +88,7 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, proto, addr string, tlsC
 	if err == nil {
 		err = out
 	}
-	return &DockerCli{
+	cli := &DockerCli{
 		proto:      proto,
 		addr:       addr,
 		in:         in,
@@ -96,6 +99,23 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, proto, addr string, tlsC
 		tlsConfig:  tlsConfig,
 		scheme:     scheme,
 	}
+
+	// NOTE: store engine ID as part of overall Docker config
+	// (still being defined, see presets discussion)
+	configDir, err := searchConfigDir()
+
+	// Load registry auth from config
+	// ...
+	// profit
+	// --> move code from cal(), no need to reload the config file every time
+
+	// Load engine auth from config
+	engineKeyPath := path.Join(configDir, "engineKey")
+	// LoadKey(dirPath string, generateIfMissing bool)
+	engineKey, err := libtrust.LoadKey(engineKeyPath, true)
+	cli.engineKey = engineKey
+
+	return cli
 }
 
 type DockerCli struct {

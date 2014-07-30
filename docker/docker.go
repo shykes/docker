@@ -221,6 +221,7 @@ func main() {
 			log.Fatal(err)
 		}
 	} else {
+		// Client mode
 		if flHosts.Len() > 1 {
 			log.Fatal("Please specify only one -H")
 		}
@@ -259,12 +260,29 @@ func main() {
 			}
 		}
 
+		// Load this client's keypair
+		// NOTE: RSA vs ECDSA format?
+		//	- ECDSA is way faster
+		//	- But, what about interop with ssh, pgp, tls?
+
+		// NOTE: 
+
+		// FIXME: what do we do with existing TLS config? Leave separate? Merge in?
+		// Possible answer:
+		//	1) Engine auth & custom TLS auth are 2 separate layers, can be used together
+		//	2) Implement server-side authorization of clients. No more need for custom TLS client certs.
+		//	3) Implement client-side authorization of daemons. No more need for custom TLS server certs.
+
+
+
 		if *flTls || *flTlsVerify {
-			cli = client.NewDockerCli(os.Stdin, os.Stdout, os.Stderr, protoAddrParts[0], protoAddrParts[1], &tlsConfig)
+			cli = client.NewDockerCli(os.Stdin, os.Stdout, os.Stderr, protoAddrParts[0], protoAddrParts[1], engineKey, &tlsConfig)
 		} else {
-			cli = client.NewDockerCli(os.Stdin, os.Stdout, os.Stderr, protoAddrParts[0], protoAddrParts[1], nil)
+			cli = client.NewDockerCli(os.Stdin, os.Stdout, os.Stderr, protoAddrParts[0], protoAddrParts[1], engineKey, nil)
 		}
 
+		// FIXME: misleading name
+		// ParseCommands actually executes the command... maybe change the name?
 		if err := cli.ParseCommands(flag.Args()...); err != nil {
 			if sterr, ok := err.(*utils.StatusError); ok {
 				if sterr.Status != "" {
