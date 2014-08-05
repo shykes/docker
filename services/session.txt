@@ -1,0 +1,111 @@
+# Flask and Redis app with Docker
+
+`Servicefile` defines an app which consists of two services: a web server and a Redis database.
+
+```
+web:
+  image: .
+  link: redis
+redis:
+  image: redis
+```
+
+
+$ docker services
+myapp
+   ^
+    \---------------- shell in a throwaway container
+		docker run --in myapp --rm -i -t ubuntu base
+
+sentry
+	# "the postgres container in my sentry"
+	f5454545454	(exposes: 80)
+		\--> "db"
+	b1b1b1b1b1b	(exposes: 5432)
+
+myapp/web
+	(containers:)
+	f4242424242	(exposes: 80, 8888)
+	f4334343434	(exposes: 22)
+
+myapp/web/core1
+
+myapp/web/core2
+
+
+myapp/analytics
+	
+
+myapp/db [magical ambassador to mydb]
+	docker run --in myapp/db -p 3306 mysql
+	docker run --in myapp/db amazon-rds-ambassador
+	docker tunnel --in myapp/db --to mydb -p 3306
+	docker run --in myapp/db mycompany/dbproxy --credentials my_employee_key
+OR
+myapp/db [-> /mydb]
+
+myotherapp
+myotherapp/web
+myotherapp/db
+mydb
+
+$ docker run _builtins/link --src myapp/db --dst mydb
+
+$ docker link add myapp db mydb
+$ docker link add mydb app1 myapp
+
+[myapp] ----(db)-----> 10.0.0.1 [mydb]
+[myapp] 10.0.0.2 <---(app1)---- [mydb]
+
+# << meanwhile inside an app running in myapp >>
+[...]
+echo 'DROP TABLE *' | nc db 3306
+# <....>
+
+
+$ docker link list --src myapp
+NAME	DST
+------------
+db	mydb
+
+
+# Creating containers in "leaf" service
+$ docker containers myapp/frontend
+$ docker container create --in myapp/frontend -p 80 ubuntu bash
+$ docker containers myapp/frontend
+f42fb1223
+
+# Creating containers in "parent" service
+$ docker containers myapp
+$ docker container create --in myapp kubernetes/service-proxy
+$ docker containers myapp
+424242424
+
+
+$ docker children list myapp
+frontend
+backend
+
+
+
+Type `docker services start` to start up all the services in the current directory:
+
+    $ docker services start
+    ...
+
+
+    $ docker services
+    Name         Image     Status
+    ================================================
+    web          .         Up (3 containers)
+    redis        redis     Up (1 container)
+
+
+    $ docker ps
+    Name        Image       Status
+    ================================================
+    web.1       .           Up
+    web.2       .           Up
+    web.3       .           Up
+    redis.1     redis       Up
+
