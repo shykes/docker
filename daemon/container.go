@@ -510,13 +510,8 @@ func (container *Container) monitor(callback execdriver.StartCallback) error {
 	if container.daemon != nil && container.daemon.srv != nil {
 		container.daemon.srv.LogEvent("die", container.ID, container.daemon.repositories.ImageName(container.Image))
 	}
-	if container.daemon != nil && container.daemon.srv != nil && container.daemon.srv.IsRunning() {
-		// FIXME: here is race condition between two RUN instructions in Dockerfile
-		// because they share same runconfig and change image. Must be fixed
-		// in builder/builder.go
-		if err := container.toDisk(); err != nil {
-			utils.Errorf("Error dumping container %s state to disk: %s\n", container.ID, err)
-		}
+	if err := container.toDisk(); err != nil {
+		utils.Errorf("Error dumping container %s state to disk: %s\n", container.ID, err)
 	}
 	return err
 }
