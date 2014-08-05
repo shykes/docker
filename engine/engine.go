@@ -201,6 +201,12 @@ func (eng *Engine) IsShutdown() bool {
 	return eng.shutdown
 }
 
+func (eng *Engine) IsShutdown() bool {
+	eng.l.Lock()
+	defer eng.l.Unlock()
+	return eng.shutdown
+}
+
 // ParseJob creates a new job from a text description using a shell-like syntax.
 //
 // The following syntax is used to parse `input`:
