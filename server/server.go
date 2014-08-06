@@ -25,7 +25,6 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"time"
 
 	"github.com/docker/docker/daemon"
 	"github.com/docker/docker/dockerversion"
@@ -108,27 +107,6 @@ func (srv *Server) IsRunning() bool {
 	srv.RLock()
 	defer srv.RUnlock()
 	return srv.running
-}
-
-func (srv *Server) Close() error {
-	if srv == nil {
-		return nil
-	}
-	srv.SetRunning(false)
-	done := make(chan struct{})
-	go func() {
-		srv.tasks.Wait()
-		close(done)
-	}()
-	select {
-	// Waiting server jobs for 15 seconds, shutdown immediately after that time
-	case <-time.After(time.Second * 15):
-	case <-done:
-	}
-	if srv.daemon == nil {
-		return nil
-	}
-	return srv.daemon.Close()
 }
 
 type Server struct {
