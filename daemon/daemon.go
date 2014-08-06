@@ -166,20 +166,24 @@ func (daemon *Daemon) load(id string) (*Container, error) {
 	if err := container.FromDisk(); err != nil {
 		return nil, err
 	}
+
 	if container.ID != id {
 		return container, fmt.Errorf("Container %s is stored at %s", container.ID, id)
 	}
+
+	container.readHostConfig()
+
 	return container, nil
 }
 
 // Register makes a container object usable by the daemon as <container.ID>
 // This is a wrapper for register
 func (daemon *Daemon) Register(container *Container) error {
-	return daemon.register(container, true, nil)
+	return daemon.register(container, true)
 }
 
 // register makes a container object usable by the daemon as <container.ID>
-func (daemon *Daemon) register(container *Container, updateSuffixarray bool, containersToStart *[]*Container) error {
+func (daemon *Daemon) register(container *Container, updateSuffixarray bool) error {
 	if container.daemon != nil || daemon.Exists(container.ID) {
 		return fmt.Errorf("Container is already loaded")
 	}
@@ -251,14 +255,6 @@ func (daemon *Daemon) register(container *Container, updateSuffixarray bool, con
 			if err := container.ToDisk(); err != nil {
 				return err
 			}
-
-			if daemon.config.AutoRestart {
-				utils.Debugf("Marking as restarting")
-
-				if containersToStart != nil {
-					*containersToStart = append(*containersToStart, container)
-				}
-			}
 		}
 	}
 	return nil
@@ -290,10 +286,9 @@ func (daemon *Daemon) LogToDisk(src *broadcastwriter.BroadcastWriter, dst, strea
 
 func (daemon *Daemon) restore() error {
 	var (
-		debug             = (os.Getenv("DEBUG") != "" || os.Getenv("TEST") != "")
-		containers        = make(map[string]*Container)
-		currentDriver     = daemon.driver.String()
-		containersToStart = []*Container{}
+		debug         = (os.Getenv("DEBUG") != "" || os.Getenv("TEST") != "")
+		containers    = make(map[string]*Container)
+		currentDriver = daemon.driver.String()
 	)
 
 	if !debug {
@@ -316,24 +311,33 @@ func (daemon *Daemon) restore() error {
 		}
 
 		// Ignore the container if it does not support the current driver being used by the graph
-		if container.Driver == "" && currentDriver == "aufs" || container.Driver == currentDriver {
+		if (container.Driver == "" && currentDriver == "aufs") || container.Driver == currentDriver {
 			utils.Debugf("Loaded container %v", container.ID)
+
 			containers[container.ID] = container
 		} else {
 			utils.Debugf("Cannot load container %s because it was created with another graph driver.", container.ID)
 		}
 	}
 
+	registeredContainers := []*Container{}
+
 	if entities := daemon.containerGraph.List("/", -1); entities != nil {
 		for _, p := range entities.Paths() {
 			if !debug {
 				fmt.Print(".")
 			}
+
 			e := entities[p]
+
 			if container, ok := containers[e.ID()]; ok {
-				if err := daemon.register(container, false, &containersToStart); err != nil {
+				if err := daemon.register(container, false); err != nil {
 					utils.Debugf("Failed to register container %s: %s", container.ID, err)
 				}
+
+				registeredContainers = append(registeredContainers, container)
+
+				// delete from the map so that a new name is not automatically generated
 				delete(containers, e.ID())
 			}
 		}
@@ -346,15 +350,27 @@ func (daemon *Daemon) restore() error {
 		if err != nil {
 			utils.Debugf("Setting default id - %s", err)
 		}
-		if err := daemon.register(container, false, &containersToStart); err != nil {
+
+		if err := daemon.register(container, false); err != nil {
 			utils.Debugf("Failed to register container %s: %s", container.ID, err)
 		}
+
+		registeredContainers = append(registeredContainers, container)
 	}
 
-	for _, container := range containersToStart {
-		utils.Debugf("Starting container %d", container.ID)
-		if err := container.Start(); err != nil {
-			utils.Debugf("Failed to start container %s: %s", container.ID, err)
+	// check the restart policy on the containers and restart any container with
+	// the restart policy of "always"
+	if daemon.config.AutoRestart {
+		utils.Debugf("Restarting containers...")
+
+		for _, container := range registeredContainers {
+			if container.hostConfig.RestartPolicy.Name == "always" {
+				utils.Debugf("Starting container %s", container.ID)
+
+				if err := container.Start(); err != nil {
+					utils.Debugf("Failed to start container %s: %s", container.ID, err)
+				}
+			}
 		}
 	}
 
