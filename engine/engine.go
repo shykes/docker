@@ -121,6 +121,7 @@ func (eng *Engine) Job(name string, args ...string) *Job {
 		Stdout: NewOutput(),
 		Stderr: NewOutput(),
 		env:    &Env{},
+		stop:   NewStopHandler(),
 	}
 	if eng.Logging {
 		job.Stderr.Add(utils.NopWriteCloser(eng.Stderr))
