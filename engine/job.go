@@ -32,6 +32,7 @@ type Job struct {
 	handler Handler
 	status  Status
 	end     time.Time
+	stop    *StopHandler
 }
 
 type Status int
@@ -60,6 +61,8 @@ func (job *Job) Run() error {
 		job.Eng.l.Unlock()
 		defer job.Eng.tasks.Done()
 	}
+	// When run is complete, tear down the stop processing goroutine
+	defer job.stop.Teardown()
 	// FIXME: make this thread-safe
 	// FIXME: implement wait
 	if !job.end.IsZero() {
@@ -228,4 +231,20 @@ func (job *Job) Error(err error) Status {
 
 func (job *Job) StatusCode() int {
 	return int(job.status)
+}
+
+// Stop sends a request to the job to stop operating.
+// It returns once a stop handler is registered, and has
+// been called.
+// The job is not guaranteed to stop: that is up to the
+// handler.
+func (job *Job) Stop() {
+	job.stop.Stop()
+}
+
+// OnStop registers a handler to be called on Stop requests.
+// If Stop() was previously called when no handler was registered,
+// the new handler is scheduled to be called right away.
+func (job *Job) OnStop(h func()) {
+	job.stop.OnStop(h)
 }
