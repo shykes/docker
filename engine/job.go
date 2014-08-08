@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"container/list"
 	"fmt"
 	"io"
 	"strings"
@@ -50,12 +51,25 @@ func (job *Job) Run() error {
 	if job.Eng.IsShutdown() {
 		return fmt.Errorf("engine is shutdown")
 	}
-	job.Eng.l.Lock()
-	job.Eng.tasks.Add(1)
-	job.Eng.l.Unlock()
-	defer job.Eng.tasks.Done()
+	var entry *list.Element
+	register := func() {
+		fmt.Printf("registering job\n")
+		job.Eng.l.Lock()
+		job.Eng.tasks.Add(1)
+		entry = job.Eng.running.PushBack(job)
+		job.Eng.l.Unlock()
+	}
+	unregister := func() {
+		fmt.Printf("Unregistering job\n")
+		job.Eng.l.Lock()
+		job.Eng.running.Remove(entry)
+		job.Eng.tasks.Done()
+		job.Eng.l.Unlock()
+	}
+	register()
 	// When run is complete, tear down the stop processing goroutine
 	defer job.stop.Teardown()
+	defer unregister()
 	// FIXME: make this thread-safe
 	// FIXME: implement wait
 	if !job.end.IsZero() {

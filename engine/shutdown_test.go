@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -76,5 +77,34 @@ func TestShutdownDuringRun(t *testing.T) {
 	}
 	if !completed {
 		t.Fatalf("job did not complete")
+	}
+}
+
+// Test that Engine.Shutdown calls Stop on all running jobs
+func TestShutdownStopAll(t *testing.T) {
+	eng := New()
+	var stopped int
+	var l sync.Mutex
+	running := make(chan struct{})
+	eng.Register("foo", func(job *Job) Status {
+		running <- struct{}{}
+		ch := make(chan struct{})
+		job.OnStop(func() {
+			l.Lock()
+			stopped++
+			l.Unlock()
+			close(ch)
+		})
+		<-ch
+		return StatusOK
+	})
+	var numJobs = 3
+	for i := 0; i < numJobs; i++ {
+		go eng.Job("foo").Run()
+		<-running
+	}
+	eng.Shutdown()
+	if stopped != numJobs {
+		t.Fatalf("%v %#v\n", stopped, *eng)
 	}
 }

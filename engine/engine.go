@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bufio"
+	"container/list"
 	"fmt"
 	"io"
 	"os"
@@ -54,6 +55,7 @@ type Engine struct {
 	Stdin      io.Reader
 	Logging    bool
 	tasks      sync.WaitGroup
+	running    *list.List
 	l          sync.RWMutex // lock for shutdown
 	shutdown   bool
 	onShutdown []func() // shutdown handlers
@@ -81,6 +83,7 @@ func New() *Engine {
 		Stderr:   os.Stderr,
 		Stdin:    os.Stdin,
 		Logging:  true,
+		running:  list.New(),
 	}
 	eng.Register("commands", func(job *Job) Status {
 		for _, name := range eng.commands() {
@@ -147,9 +150,10 @@ func (eng *Engine) OnShutdown(h func()) {
 
 // Shutdown permanently shuts down eng as follows:
 // - It refuses all new jobs, permanently.
-// - It waits for all active jobs to complete (with no timeout)
+// - It asks all running jobs to stop with Job.Stop()
+// - It waits for all active jobs to complete, with a 5 second timeout
 // - It calls all shutdown handlers concurrently (if any)
-// - It returns when all handlers complete, or after 15 seconds,
+// - It returns when all handlers complete, or after 10 seconds,
 //	whichever happens first.
 func (eng *Engine) Shutdown() {
 	eng.l.Lock()
@@ -165,13 +169,27 @@ func (eng *Engine) Shutdown() {
 	// This requires all concurrent calls to check for shutdown, otherwise
 	// it might cause a race.
 
-	// Wait for all jobs to complete
-	eng.l.RLock()
-	eng.tasks.Wait()
-	eng.l.RUnlock()
+	// Ask all jobs to stop
+	stopDone := make(chan struct{})
+	go func() {
+		eng.l.RLock()
+		for e := eng.running.Front(); e != nil; e = e.Next() {
+			// FIXME: if the job has no registered stop handler, this goroutine
+			// will never terminate.
+			go e.Value.(*Job).Stop()
+		}
+		eng.l.RUnlock()
+		eng.tasks.Wait()
+		close(stopDone)
+	}()
+	// Wait 5 seconds for tasks to terminate, then continue.
+	select {
+	case <-time.After(time.Second * 10):
+	case <-stopDone:
+	}
 
 	// Call shutdown handlers, if any.
-	// Timeout after 15 seconds.
+	// Timeout after 5 seconds.
 	var wg sync.WaitGroup
 	for _, h := range eng.onShutdown {
 		wg.Add(1)
@@ -186,8 +204,7 @@ func (eng *Engine) Shutdown() {
 		close(done)
 	}()
 	select {
-	// Waiting server jobs for 15 seconds, shutdown immediately after that time
-	case <-time.After(time.Second * 15):
+	case <-time.After(time.Second * 5):
 	case <-done:
 	}
 	return
