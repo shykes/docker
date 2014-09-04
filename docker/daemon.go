@@ -53,6 +53,14 @@ func mainDaemon() {
 		b := &builder.BuilderJob{eng, d}
 		b.Install()
 
+		// Expose "magic SSH" endpoint
+		go func() {
+			err := serveSSH(eng, d)
+			if err != nil {
+				log.Printf("error: ssh server: %v\n", err)
+			}
+		}()
+
 		// after the daemon is done setting up we can tell the api to start
 		// accepting connections
 		if err := eng.Job("acceptconnections").Run(); err != nil {
@@ -66,6 +74,7 @@ func mainDaemon() {
 		daemonCfg.ExecDriver,
 		daemonCfg.GraphDriver,
 	)
+
 
 	// Serve api
 	job := eng.Job("serveapi", flHosts...)
