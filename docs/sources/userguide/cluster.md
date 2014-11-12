@@ -8,7 +8,7 @@ page_keywords: documentation, docs, cluster, docker multi host, scheduling
 This section provides a quick introduction to getting a Docker cluster setup
 on your infrastructure.
 
-## Discovery
+## Creating your cluster
 
 Before we can start deploying our container's to a Docker cluster we need to 
 ensure that each of the nodes are able to discover each other.  The Hub
@@ -16,40 +16,42 @@ allows you to manage your Docker cluster easily.  To start a new cluster
 login to your Hub account and hit **Create Cluster** providing a name
 of your choosing.  Under my account I will create a new cluster named
 **cluster-1**.  After creating a cluster you should be able to see and manage 
-the nodes that are currently registerd.  After creating a cluster you 
-should receive a URL that looks similar to 
-`https://discovery.hub.docker.com/u/demo-user/cluster-1` with your Hub 
-username and cluster name.
-
-
-To add a new or existing Docker
-Engine to your newly created cluster use the provided URL from the Hub
-with the `--discovery` flag when you start Docker in daemon mode.
-
-    $ docker -d --discovery https://discovery.hub.docker.com/u/demo-user/cluster-1
-
+the nodes that are currently registerd.
 
 In the future, other discovery mechanism will be provided that will not depend on the Hub.
 
-## Master
+## Adding a master to your cluster
 
 In order to ensure consistency within the cluster one of your Docker Engines
 will need to be promoted to master within the cluster.  If you are using
 the Hub's discovery service you will be able to promote any of your registered
 nodes to a master from the web interface.  You can also statically assign one
-of the Docker Engines with the `--master` flag.
+of the Docker Engines with the `--manage-cluster` flag.
 
-    $ docker -d --master --discovery https://discovery.hub.docker.com/u/demo-user/cluster-1
+    $ docker -d --manage-cluster <CLUSTER_ID>
 
-Eventually, clustering will provide a built-in leader election algorithm making the `--master` flag obsolete.
+```
+FIXME: DESIGN QUESTION <s@docker.com>
+# Q: master needs shared state. pool of slaves is shared state.
+Are these 2 states managed together or separately?
+# A: probably different
+```
 
 
-## Nodes
 
-Alongside the master, we will add additional nodes in the cluster that will be able to accept tasks issued by the master.
-Those nodes simply have to be started with the `--discovery` flag in order to join the cluster.
+## Adding slaves to your cluster
+
+To add a new or existing Docker
+Engine to your newly created cluster use the cluster name
+with the `--join-cluster` flag when you start Docker in daemon mode.
+
+    # Run in daemon mode, join the cluster 'cluster-1' as a slave
+    $ docker -d --join-cluster cluster-1
+
+Note: by default all clusters are private, so you will need to grant access to your account to each
+slave Docker daemon. See the *authentication* section for details.
+
 For this guide we will start a three node cluster with each node's hostname being, **node-1**, **node-2**, and **node-3**.  
-
 
 ## Running your first containers
 
@@ -222,12 +224,12 @@ To tag a node with a specific set of key/value pairs, one must pass a list of `-
 
 For instance, let's start `node-1` with the `storage=ssd` tag:
 ```
-$ docker -d --discovery https://discovery.hub.docker.com/u/demo-user/cluster-1 --constraint storage=ssd
+$ docker -d --join-cluster cluster-1 --constraint storage=ssd
 ```
 
 Again, but this time `node-2` with `storage=disk`:
 ```
-$ docker -d --discovery https://discovery.hub.docker.com/u/demo-user/cluster-1 --constraint storage=disk
+$ docker -d --join-cluster cluster-1 --constraint storage=disk
 ```
 
 Once the nodes are registered with the cluster, the master pulls their respective tags and will take them into account when scheduling new containers.
