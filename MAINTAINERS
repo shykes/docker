@@ -162,5 +162,9 @@ bdfl = "shykes"
 	Email = "solomon@docker.com"
 	Github = "shykes"
 
-	# ADD YOURSELF HERE
+	[people.icecrime]
+
+	Name = "Arnaud Porterie"
+	Email = "arnaud@docker.com"
+	Github = "icecrime"
 
