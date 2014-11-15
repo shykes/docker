@@ -176,3 +176,8 @@ bdfl = "shykes"
 	Email = "vieux@docker.com"
 	Github = "vieux"
 
+       [people.jfrazelle]
+
+       Name = "Jessie Frazelle"
+       Email = "jessie@docker.com"
+       Github = "jfrazelle"
