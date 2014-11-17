@@ -42,7 +42,8 @@ bdfl = "shykes"
 		"crosbymichael",
 		"vieux",
 		"backjlack",
-		"erikh"
+		"erikh",
+		"vbatts"
 	]
 
 	lead = "crosbymichael"
@@ -120,6 +121,7 @@ bdfl = "shykes"
 		people = [
 			"samalba",
 			"dmp42",
+			"vbatts",
 			"joffrey"
 		]
 
@@ -168,11 +170,17 @@ bdfl = "shykes"
 	Email = "erik@docker.com"
 	Github = "erikh"
 
-	# ADD YOURSELF HERE
-
 	[people.vieux]
 
 	Name = "Victor Vieux"
 	Email = "vieux@docker.com"
 	Github = "vieux"
+
+	[people.vbatts]
+
+	Name = "Vincent Batts"
+	Email = "vbatts@redhat.com"
+	Github = "vbatts"
+
+	# ADD YOURSELF HERE
 
