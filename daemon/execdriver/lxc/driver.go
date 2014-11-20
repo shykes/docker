@@ -50,6 +50,10 @@ func NewDriver(root, initPath string, apparmor bool) (*driver, error) {
 	}, nil
 }
 
+func (d *driver) Init(id string) error {
+	return nil
+}
+
 func (d *driver) Name() string {
 	version := d.version()
 	return fmt.Sprintf("%s-%s", DriverName, version)
@@ -456,6 +460,10 @@ func (d *driver) generateEnvConfig(c *execdriver.Command) error {
 // Clean not implemented for lxc
 func (d *driver) Clean(id string) error {
 	return nil
+}
+
+func (d *driver) NetNsPath(id string) string {
+	return ""
 }
 
 type TtyConsole struct {

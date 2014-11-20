@@ -80,6 +80,25 @@ func (d *driver) createContainer(c *execdriver.Command) (*libcontainer.Config, e
 	return container, nil
 }
 
+func (d *driver) createNamespaces(id string) (err error) {
+	nsPath := filepath.Join(d.root, id, "ns")
+	if err := os.MkdirAll(nsPath, 0655); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			os.RemoveAll(nsPath)
+		}
+	}()
+	for _, ns := range []string{"net"} {
+		p := filepath.Join(nsPath, ns)
+		if err := execdriver.CreateNamespace(ns, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *driver) createNetwork(container *libcontainer.Config, c *execdriver.Command) error {
 	if c.Network.HostNetworking {
 		container.Namespaces["NEWNET"] = false
