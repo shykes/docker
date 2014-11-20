@@ -80,33 +80,52 @@ func (d *driver) createContainer(c *execdriver.Command) (*libcontainer.Config, e
 	return container, nil
 }
 
+func (d *driver) createNamespaces(id string) (err error) {
+	nsPath := filepath.Join(d.root, id, "ns")
+	if err := os.MkdirAll(nsPath, 0655); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			os.RemoveAll(nsPath)
+		}
+	}()
+	for _, ns := range []string{"net"} {
+		p := filepath.Join(nsPath, ns)
+		if err := execdriver.CreateNamespace(ns, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *driver) createNetwork(container *libcontainer.Config, c *execdriver.Command) error {
 	if c.Network.HostNetworking {
 		container.Namespaces["NEWNET"] = false
 		return nil
 	}
 
-	container.Networks = []*libcontainer.Network{
-		{
-			Mtu:     c.Network.Mtu,
-			Address: fmt.Sprintf("%s/%d", "127.0.0.1", 0),
-			Gateway: "localhost",
-			Type:    "loopback",
-		},
-	}
+	//container.Networks = []*libcontainer.Network{
+	//{
+	//Mtu:     c.Network.Mtu,
+	//Address: fmt.Sprintf("%s/%d", "127.0.0.1", 0),
+	//Gateway: "localhost",
+	//Type:    "loopback",
+	//},
+	//}
 
-	if c.Network.Interface != nil {
-		vethNetwork := libcontainer.Network{
-			Mtu:        c.Network.Mtu,
-			Address:    fmt.Sprintf("%s/%d", c.Network.Interface.IPAddress, c.Network.Interface.IPPrefixLen),
-			MacAddress: c.Network.Interface.MacAddress,
-			Gateway:    c.Network.Interface.Gateway,
-			Type:       "veth",
-			Bridge:     c.Network.Interface.Bridge,
-			VethPrefix: "veth",
-		}
-		container.Networks = append(container.Networks, &vethNetwork)
-	}
+	//if c.Network.Interface != nil {
+	//vethNetwork := libcontainer.Network{
+	//Mtu:        c.Network.Mtu,
+	//Address:    fmt.Sprintf("%s/%d", c.Network.Interface.IPAddress, c.Network.Interface.IPPrefixLen),
+	//MacAddress: c.Network.Interface.MacAddress,
+	//Gateway:    c.Network.Interface.Gateway,
+	//Type:       "veth",
+	//Bridge:     c.Network.Interface.Bridge,
+	//VethPrefix: "veth",
+	//}
+	//container.Networks = append(container.Networks, &vethNetwork)
+	//}
 
 	if c.Network.ContainerID != "" {
 		d.Lock()
@@ -123,8 +142,14 @@ func (d *driver) createNetwork(container *libcontainer.Config, c *execdriver.Com
 			Type:   "netns",
 			NsPath: nspath,
 		})
+		return nil
 	}
 
+	nsPath := d.NetNsPath(c.ID)
+	container.Networks = append(container.Networks, &libcontainer.Network{
+		Type:   "netns",
+		NsPath: nsPath,
+	})
 	return nil
 }
 

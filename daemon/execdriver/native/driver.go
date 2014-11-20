@@ -70,6 +70,13 @@ type execOutput struct {
 	err      error
 }
 
+func (d *driver) Init(id string) error {
+	if err := d.createContainerRoot(id); err != nil {
+		return err
+	}
+	return d.createNamespaces(id)
+}
+
 func (d *driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, startCallback execdriver.StartCallback) (execdriver.ExitStatus, error) {
 	// take the Command and populate the libcontainer.Config from it
 	container, err := d.createContainer(c)
@@ -101,9 +108,6 @@ func (d *driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, startCallba
 		args     = append([]string{c.ProcessConfig.Entrypoint}, c.ProcessConfig.Arguments...)
 	)
 
-	if err := d.createContainerRoot(c.ID); err != nil {
-		return execdriver.ExitStatus{-1, false}, err
-	}
 	defer d.cleanContainer(c.ID)
 
 	if err := d.writeContainerFile(container, c.ID); err != nil {
@@ -271,11 +275,29 @@ func (d *driver) cleanContainer(id string) error {
 }
 
 func (d *driver) createContainerRoot(id string) error {
-	return os.MkdirAll(filepath.Join(d.root, id), 0655)
+	// create also dir for namespaces
+	return os.MkdirAll(filepath.Join(d.root, id, "ns"), 0655)
 }
 
 func (d *driver) Clean(id string) error {
+	if err := d.cleanContainer(id); err != nil {
+		return nil
+	}
+	nsPath := filepath.Join(d.root, id, "ns")
+	files, err := ioutil.ReadDir(nsPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, f := range files {
+		if err := syscall.Unmount(filepath.Join(nsPath, f.Name()), syscall.MNT_DETACH); err != nil {
+			return err
+		}
+	}
 	return os.RemoveAll(filepath.Join(d.root, id))
+}
+
+func (d *driver) NetNsPath(id string) string {
+	return filepath.Join(d.root, id, "ns", "net")
 }
 
 func getEnv(key string, env []string) string {

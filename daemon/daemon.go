@@ -26,6 +26,8 @@ import (
 	"github.com/docker/docker/engine"
 	"github.com/docker/docker/graph"
 	"github.com/docker/docker/image"
+	"github.com/docker/docker/network"
+	"github.com/docker/docker/network/veth"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/broadcastwriter"
 	"github.com/docker/docker/pkg/graphdb"
@@ -98,6 +100,7 @@ type Daemon struct {
 	driver         graphdriver.Driver
 	execDriver     execdriver.Driver
 	trustStore     *trust.TrustStore
+	networkDriver  network.Driver
 }
 
 // Install installs daemon capabilities to eng.
@@ -844,21 +847,31 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		return nil, fmt.Errorf("could not create trust store: %s", err)
 	}
 
-	if !config.DisableNetwork {
-		job := eng.Job("init_networkdriver")
+	var netDriver network.Driver
 
-		job.SetenvBool("EnableIptables", config.EnableIptables)
-		job.SetenvBool("InterContainerCommunication", config.InterContainerCommunication)
-		job.SetenvBool("EnableIpForward", config.EnableIpForward)
-		job.SetenvBool("EnableIpMasq", config.EnableIpMasq)
-		job.Setenv("BridgeIface", config.BridgeIface)
-		job.Setenv("BridgeIP", config.BridgeIP)
-		job.Setenv("FixedCIDR", config.FixedCIDR)
+	if !config.DisableNetwork {
+		netCfg := veth.Config{
+			Iface:          config.BridgeIface,
+			EnableIPTables: config.EnableIptables,
+			ICC:            config.InterContainerCommunication,
+			IPMasq:         config.EnableIpMasq,
+			IPForward:      config.EnableIpForward,
+			CIDR:           config.BridgeIP,
+			FixedCIDR:      config.FixedCIDR,
+		}
+		bridge, err := veth.New(netCfg)
+		if err != nil {
+			return nil, err
+		}
+		job := eng.Job("init_networkdriver")
+		job.Setenv("BridgeIface", bridge.Iface)
+		job.Setenv("BridgeNet", bridge.Net.String())
 		job.Setenv("DefaultBindingIP", config.DefaultIp.String())
 
 		if err := job.Run(); err != nil {
 			return nil, err
 		}
+		netDriver = bridge
 	}
 
 	graphdbPath := path.Join(config.Root, "linkgraph.db")
@@ -909,6 +922,7 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		execDriver:     ed,
 		eng:            eng,
 		trustStore:     t,
+		networkDriver:  netDriver,
 	}
 	if err := daemon.restore(); err != nil {
 		return nil, err
