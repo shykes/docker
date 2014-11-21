@@ -1,6 +1,8 @@
 package net
 
 import (
+	"os"
+
 	e "github.com/docker/docker/engine"
 )
 
@@ -26,8 +28,8 @@ func (n *Networks) Default() string {
 func (n *Networks) Get(netid string) (*Network, error) {
 	// FIXME
 	net, ok := n.nets[netid]
-	if ok != nil {
-		return nil, os.ErrNotExist{}
+	if !ok {
+		return nil, os.ErrNotExist
 	}
 	return net, nil
 }
@@ -61,10 +63,12 @@ func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint
 
 type Endpoint struct {
 	name string
-	addr []net.IP
+	addr []IP
 	c    Container
 	// FIXME: per-endpoint port filtering as an advanced feature?
 }
+
+type IP string
 
 type Service struct {
 	name    string
@@ -82,7 +86,7 @@ type PortSet interface {
 	// but without the baggage.
 }
 
-func (n *Networks) Install(eng e.Engine) error {
+func (n *Networks) Install(eng *e.Engine) error {
 	eng.Register("net_create", n.CmdCreate)
 	eng.Register("net_rm", n.CmdRm)
 	eng.Register("net_ls", n.CmdLs)

@@ -26,6 +26,7 @@ import (
 	"github.com/docker/docker/engine"
 	"github.com/docker/docker/graph"
 	"github.com/docker/docker/image"
+	"github.com/docker/docker/net"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/broadcastwriter"
 	"github.com/docker/docker/pkg/graphdb"
@@ -559,12 +560,19 @@ func parseSecurityOpt(container *Container, config *runconfig.Config) error {
 	return err
 }
 
-func (daemon *Daemon) newContainer(netid, epid string, config *runconfig.Config, img *image.Image) (*Container, error) {
+type NetContainerShim struct {
+	*Container
+}
+
+func (ncs *NetContainerShim) NSPath() string {
+	return ncs.Container.root + "/netns"
+}
+
+func (daemon *Daemon) newContainer(netid, name string, config *runconfig.Config, img *image.Image) (*Container, error) {
 	var (
-		id  string
+		id  = utils.GenerateRandomID()
 		err error
 	)
-	id := utils.GenerateRandomID()
 
 	daemon.generateHostname(id, config)
 	entrypoint, args := daemon.getEntrypointAndArgs(config.Entrypoint, config.Cmd)
@@ -603,7 +611,7 @@ func (daemon *Daemon) newContainer(netid, epid string, config *runconfig.Config,
 	// (Otherwise the namespace is not created until the process is started),
 	// and it is lost when the process terminates.
 	// For now we assume the netns will be available at $ROOT/netns
-	if err := n.AddEndpoint(container.root+"/netns", name); err != nil {
+	if _, err := n.AddEndpoint(&NetContainerShim{container}, name, false); err != nil {
 		return nil, err
 	}
 
@@ -852,7 +860,7 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		return nil, err
 	}
 
-	networks, err := net.New()
+	networks, err := net.New("")
 	if err != nil {
 		return nil, err
 	}
@@ -924,6 +932,7 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 	daemon := &Daemon{
 		repository:     daemonRepo,
 		containers:     &contStore{s: make(map[string]*Container)},
+		networks:       networks,
 		execCommands:   newExecStore(),
 		graph:          g,
 		repositories:   repositories,
