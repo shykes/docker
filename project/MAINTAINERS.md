@@ -99,7 +99,7 @@ who should be expected to have the *answer*.
 
 Currently the project is organized in 3 groups of people: the BDFL, the core, and the subsystems.
 
-### The BDFL
+### The Benevolent dictator for life (BDFL)
 
 Docker follows the timeless, highly efficient and totally unfair system
 known as [Benevolent dictator for
@@ -207,9 +207,9 @@ Infrastructure operators:
 ### Subsystems
 
 As the project grows, it gets separated into well-defined subsystems. Each subsystem
-has a dedicated group of maintainers, which are responsible for its quali
-dedicated to that subsytem. This "cellular division" is the primary mechanism
-for scaling maintenance of the project as it grows.
+has a dedicated group of maintainers, which are responsible for its quality
+This "cellular division" is the primary mechanism for scaling maintenance of the
+project as it grows.
 
 The maintainers of each subsytem are responsible for:
 

@@ -1,13 +1,14 @@
 # See ./project/MAINTAINERS.md for details
 
 
-# Ideally, the BDFL role is like the Queen of England: awesome crown, but not
-# an actual operational role day-to-day. The real job of a BDFL is to NEVER GO AWAY.
-# Every other rule can change, perhaps drastically so, but the BDFL will always
-# be there, preserving the philosophy and principles of the project, and keeping
-# ultimate authority over its fate. This gives us great flexibility in experimenting
-# with various governance models, knowing that we can always press the "reset" button
-# without fear of fragmentation or deadlock. See the US congress for a counter-example.
+# Ideally, the Benevolent dictator for life (BDFL) role is like the Queen of England:
+# awesome crown, but not an actual operational role day-to-day. The real job of a
+# BDFL is to NEVER GO AWAY. Every other rule can change, perhaps drastically so,
+# but the BDFL will always be there, preserving the philosophy and principles of
+# the project, and keeping ultimate authority over its fate. This gives us great
+# flexibility in experimenting with various governance models, knowing that we can
+# always press the "reset" button without fear of fragmentation or deadlock. See
+# the US congress for a counter-example.
 
 bdfl = "shykes"
 
