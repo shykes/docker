@@ -50,6 +50,7 @@ type ExitStatus struct {
 }
 
 type Driver interface {
+	Init(id string) error                                                          // initialize fs storage for container with id
 	Run(c *Command, pipes *Pipes, startCallback StartCallback) (ExitStatus, error) // Run executes the process and blocks until the process exits and returns the exit code
 	// Exec executes the process in an existing container, blocks until the process exits and returns the exit code
 	Exec(c *Command, processConfig *ProcessConfig, pipes *Pipes, startCallback StartCallback) (int, error)
@@ -61,6 +62,7 @@ type Driver interface {
 	GetPidsForContainer(id string) ([]int, error) // Returns a list of pids for the given container.
 	Terminate(c *Command) error                   // kill it with fire
 	Clean(id string) error                        // clean all traces of container exec
+	NetNsPath(id string) string                   // returns path to network namespace of specific container
 }
 
 // Network settings of the container

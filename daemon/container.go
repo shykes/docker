@@ -23,6 +23,7 @@ import (
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/links"
 	"github.com/docker/docker/nat"
+	"github.com/docker/docker/network"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/broadcastwriter"
 	"github.com/docker/docker/pkg/ioutils"
@@ -73,6 +74,7 @@ type Container struct {
 	Name           string
 	Driver         string
 	ExecDriver     string
+	Interfaces     []network.Interface
 
 	command *execdriver.Command
 	StreamConfig
@@ -477,6 +479,18 @@ func (container *Container) AllocateNetwork() error {
 		eng = container.daemon.eng
 	)
 
+	ifaces, err := container.daemon.networkDriver.AddEndpoint("", container.ID, map[string]string{"Mac": container.Config.MacAddress})
+	log.Errorf("Interfaces: %v", ifaces)
+	container.Interfaces = ifaces
+
+	nsPath := container.daemon.execDriver.NetNsPath(container.ID)
+	for _, iface := range ifaces {
+		log.Errorf("Here should be setup of %s in %s", iface, nsPath)
+		if err := iface.Setup(nsPath); err != nil {
+			return err
+		}
+	}
+
 	job := eng.Job("allocate_interface", container.ID)
 	job.Setenv("RequestedMac", container.Config.MacAddress)
 	if env, err = job.Stdout.AddEnv(); err != nil {
@@ -699,7 +713,7 @@ func (container *Container) Stop(seconds int) error {
 			return err
 		}
 	}
-	return nil
+	return container.daemon.networkDriver.RemoveEndpoint(container.ID)
 }
 
 func (container *Container) Restart(seconds int) error {

@@ -98,6 +98,9 @@ func (daemon *Daemon) Create(config *runconfig.Config, hostConfig *runconfig.Hos
 	if err := daemon.createRootfs(container, img); err != nil {
 		return nil, nil, err
 	}
+	if err := daemon.execDriver.Init(container.ID); err != nil {
+		return nil, nil, err
+	}
 	if hostConfig != nil {
 		if err := daemon.setHostConfig(container, hostConfig); err != nil {
 			return nil, nil, err
