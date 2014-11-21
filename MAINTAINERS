@@ -177,3 +177,8 @@ bdfl = "shykes"
 	Email = "vieux@docker.com"
 	Github = "vieux"
 
+	[people.sven]
+	Name = "Sven Dowideit"
+	Email = "SvenDowideit@home.org.au"
+	GitHub = "SvenDowideit"
+
