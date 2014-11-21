@@ -73,11 +73,6 @@ func (daemon *Daemon) Containers(job *engine.Job) engine.Status {
 		if !container.Running && !all && n <= 0 && since == "" && before == "" {
 			return nil
 		}
-
-		if !psFilters.Match("name", container.Name) {
-			return nil
-		}
-
 		if !psFilters.Match("id", container.ID) {
 			return nil
 		}
@@ -88,6 +83,26 @@ func (daemon *Daemon) Containers(job *engine.Job) engine.Status {
 			}
 			return nil
 		}
+		// FIXME netdriver: to honor the 'name=<NAME>' filter, we need to
+		// look for all endpoints named "<NAME>" on all networks, and use
+		// that as a match.
+		// So instead of "all containers with name <NAME>", the filter now means
+		//               "all containers linked to any network endpoint named <NAME>"
+		var nameMatch bool
+		for _, epid := range container.Endpoints {
+			ep, err := daemon.networks.GetEndpoint(epid)
+			if err != nil {
+				return err
+			}
+			if psFilters.Match("name", ep.Name()) {
+				nameMatch = true
+				break
+			}
+		}
+		if !nameMatch {
+			return nil
+		}
+
 		if n > 0 && displayed == n {
 			return errLast
 		}

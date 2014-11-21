@@ -43,6 +43,7 @@ func (daemon *Daemon) ContainerStart(job *engine.Job) engine.Status {
 	return engine.StatusOK
 }
 
+// FIXME: this is no longer specific to start, move it to another file.
 func (daemon *Daemon) setHostConfig(container *Container, hostConfig *runconfig.HostConfig) error {
 	// Validate the HostConfig binds. Make sure that:
 	// the source exists
@@ -58,10 +59,6 @@ func (daemon *Daemon) setHostConfig(container *Container, hostConfig *runconfig.
 				return fmt.Errorf("Could not create local directory '%s' for bind mount: %s!", source, err.Error())
 			}
 		}
-	}
-	// Register any links from the host config before starting the container
-	if err := daemon.RegisterLinks(container, hostConfig); err != nil {
-		return err
 	}
 	container.SetHostConfig(hostConfig)
 	container.ToDisk()

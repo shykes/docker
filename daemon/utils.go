@@ -8,6 +8,7 @@ import (
 	"github.com/docker/docker/runconfig"
 )
 
+// FIXME: PLEASE DOCUMENT NON-INTUITIVE FUNCTIONS!
 func migratePortMappings(config *runconfig.Config, hostConfig *runconfig.HostConfig) error {
 	if config.PortSpecs != nil {
 		ports, bindings, err := nat.ParsePortSpecs(config.PortSpecs)

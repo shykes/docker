@@ -40,7 +40,11 @@ func (daemon *Daemon) ContainerInspect(job *engine.Job) engine.Status {
 		out.Set("ResolvConfPath", container.ResolvConfPath)
 		out.Set("HostnamePath", container.HostnamePath)
 		out.Set("HostsPath", container.HostsPath)
-		out.Set("Name", container.Name)
+		// FIXME: there is no concept of unique container "name".
+		// It was a mistake to expose this in the public API.
+		// To minimize breakage we are exposing ID as "name".
+		out.Set("Name", container.ID)
+
 		out.Set("Driver", container.Driver)
 		out.Set("ExecDriver", container.ExecDriver)
 		out.Set("MountLabel", container.MountLabel)
@@ -48,11 +52,9 @@ func (daemon *Daemon) ContainerInspect(job *engine.Job) engine.Status {
 		out.SetJson("Volumes", container.Volumes)
 		out.SetJson("VolumesRW", container.VolumesRW)
 
-		if children, err := daemon.Children(container.Name); err == nil {
-			for linkAlias, child := range children {
-				container.hostConfig.Links = append(container.hostConfig.Links, fmt.Sprintf("%s:%s", child.Name, linkAlias))
-			}
-		}
+		// FIXME netdriver: expose network endpoints under which this container
+		// is linked.
+		// out.Set("Endpoints", "?")
 
 		out.SetJson("HostConfig", container.hostConfig)
 

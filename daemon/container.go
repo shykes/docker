@@ -332,12 +332,26 @@ func (container *Container) Start() (err error) {
 	if err := container.Mount(); err != nil {
 		return err
 	}
+
+
+	/////////////// rEPLACE THIS WITH CALLS TO NETWORK CONTROLLER
 	if err := container.initializeNetworking(); err != nil {
 		return err
 	}
 	if err := container.updateParentsHosts(); err != nil {
 		return err
 	}
+
+	// Iterate on HostConfig.PortBindinds -> call endpoint.Expose(.., true)
+	// Like in create (start can override HostConfig)
+
+	// + Deal with generating /etc/hosts everywhere
+	// -> which part of that is done by NetController vs Orchestrator?
+
+	////////////////////////
+
+
+
 	container.verifyDaemonSettings()
 	if err := container.prepareVolumes(); err != nil {
 		return err
@@ -467,53 +481,33 @@ func (container *Container) buildHostnameAndHostsFiles(IP string) error {
 	return container.buildHostsFiles(IP)
 }
 
+// FIXME netdriver: there is no longer a single singleton network - instead the
+// container can be attached to any number of networks.
+// FIXME netdriver: how do we handle hostconfig/mac address on create?
 func (container *Container) AllocateNetwork() error {
+	// FIXME: move mode selection up to calling function (initializeNetworking)?
 	mode := container.hostConfig.NetworkMode
 	if container.Config.NetworkDisabled || !mode.IsPrivate() {
 		return nil
 	}
-
 	var (
 		err error
 		eng = container.daemon.eng
 	)
-
-	ifaces, err := container.daemon.networkDriver.AddEndpoint("", container.ID, map[string]string{"Mac": container.Config.MacAddress})
-	log.Errorf("Interfaces: %v", ifaces)
-	container.Interfaces = ifaces
-
-	nsPath := container.daemon.execDriver.NetNsPath(container.ID)
-	for _, iface := range ifaces {
-		log.Errorf("Here should be setup of %s in %s", iface, nsPath)
-		if err := iface.Setup(nsPath); err != nil {
-			return err
-		}
-	}
-
-	//job := eng.Job("allocate_interface", container.ID)
-	//job.Setenv("RequestedMac", container.Config.MacAddress)
-	//if env, err = job.Stdout.AddEnv(); err != nil {
-	//return err
-	//}
-	//if err = job.Run(); err != nil {
-	//return err
-	//}
-
-	// Error handling: At this point, the interface is allocated so we have to
-	// make sure that it is always released in case of error, otherwise we
-	// might leak resources.
-
+	// Migrate old portmapping configuration from pre-0.7
 	if container.Config.PortSpecs != nil {
 		if err = migratePortMappings(container.Config, container.hostConfig); err != nil {
-			eng.Job("release_interface", container.ID).Run()
 			return err
 		}
 		container.Config.PortSpecs = nil
 		if err = container.WriteHostConfig(); err != nil {
-			eng.Job("release_interface", container.ID).Run()
 			return err
 		}
 	}
+
+	// 
+
+
 
 	var (
 		portSpecs = make(nat.PortSet)
@@ -1053,6 +1047,7 @@ func (container *Container) initializeNetworking() error {
 
 		return ioutil.WriteFile(container.HostsPath, content, 0644)
 	}
+	// --net container:<id>
 	if container.hostConfig.NetworkMode.IsContainer() {
 		// we need to get the hosts files from the container to join
 		nc, err := container.getNetworkedContainer()
@@ -1065,10 +1060,16 @@ func (container *Container) initializeNetworking() error {
 		container.Config.Domainname = nc.Config.Domainname
 		return nil
 	}
+	// FIXME: why not check for mode.IsPrivate()?
+	// FIXME: why is "disabled" not a mode? (presumably reverse-compat but would
+	// be nice to have a comment about that somewhere).
+
+	// --net disabled
 	if container.daemon.config.DisableNetwork {
 		container.Config.NetworkDisabled = true
 		return container.buildHostnameAndHostsFiles("127.0.1.1")
 	}
+	// Regular network strategy
 	if err := container.AllocateNetwork(); err != nil {
 		return err
 	}
@@ -1229,6 +1230,7 @@ func (container *Container) waitForStart() error {
 	return nil
 }
 
+// FIXME: DOCUMENT PLEASE
 func (container *Container) allocatePort(eng *engine.Engine, port nat.Port, bindings nat.PortMap) error {
 	binding := bindings[port]
 	if container.hostConfig.PublishAllPorts && len(binding) == 0 {
@@ -1288,7 +1290,9 @@ func (container *Container) getIpcContainer() (*Container, error) {
 	return c, nil
 }
 
+// FIXME: please document. @crosbymichael.
 func (container *Container) getNetworkedContainer() (*Container, error) {
+	// FIXME: it would be more readable if this was passed as an argument
 	parts := strings.SplitN(string(container.hostConfig.NetworkMode), ":", 2)
 	switch parts[0] {
 	case "container":

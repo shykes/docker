@@ -210,10 +210,6 @@ func (daemon *Daemon) register(container *Container, updateSuffixarray bool) err
 	if err := validateID(container.ID); err != nil {
 		return err
 	}
-	if err := daemon.ensureName(container); err != nil {
-		return err
-	}
-
 	container.daemon = daemon
 
 	// Attach to stdout and stderr
@@ -280,21 +276,6 @@ func (daemon *Daemon) register(container *Container, updateSuffixarray bool) err
 	return nil
 }
 
-func (daemon *Daemon) ensureName(container *Container) error {
-	if container.Name == "" {
-		name, err := daemon.generateNewName(container.ID)
-		if err != nil {
-			return err
-		}
-		container.Name = name
-
-		if err := container.ToDisk(); err != nil {
-			log.Debugf("Error saving container name %s", err)
-		}
-	}
-	return nil
-}
-
 func (daemon *Daemon) LogToDisk(src *broadcastwriter.BroadcastWriter, dst, stream string) error {
 	log, err := os.OpenFile(dst, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0600)
 	if err != nil {
@@ -307,7 +288,6 @@ func (daemon *Daemon) LogToDisk(src *broadcastwriter.BroadcastWriter, dst, strea
 func (daemon *Daemon) restore() error {
 	var (
 		debug         = (os.Getenv("DEBUG") != "" || os.Getenv("TEST") != "")
-		containers    = make(map[string]*Container)
 		currentDriver = daemon.driver.String()
 	)
 
@@ -318,8 +298,7 @@ func (daemon *Daemon) restore() error {
 	if err != nil {
 		return err
 	}
-
-	for _, v := range dir {
+	for _, v := dir {
 		id := v.Name()
 		container, err := daemon.load(id)
 		if !debug {
@@ -329,61 +308,22 @@ func (daemon *Daemon) restore() error {
 			log.Errorf("Failed to load container %v: %v", id, err)
 			continue
 		}
-
 		// Ignore the container if it does not support the current driver being used by the graph
 		if (container.Driver == "" && currentDriver == "aufs") || container.Driver == currentDriver {
 			log.Debugf("Loaded container %v", container.ID)
-
-			containers[container.ID] = container
+			if err := daemon.register(container, false); err != nil {
+				log.Debugf("Failed to register container %s: %s", container.ID, err)
+			}
 		} else {
 			log.Debugf("Cannot load container %s because it was created with another graph driver.", container.ID)
 		}
 	}
-
-	registeredContainers := []*Container{}
-
-	if entities := daemon.containerGraph.List("/", -1); entities != nil {
-		for _, p := range entities.Paths() {
-			if !debug {
-				fmt.Print(".")
-			}
-
-			e := entities[p]
-
-			if container, ok := containers[e.ID()]; ok {
-				if err := daemon.register(container, false); err != nil {
-					log.Debugf("Failed to register container %s: %s", container.ID, err)
-				}
-
-				registeredContainers = append(registeredContainers, container)
-
-				// delete from the map so that a new name is not automatically generated
-				delete(containers, e.ID())
-			}
-		}
-	}
-
-	// Any containers that are left over do not exist in the graph
-	for _, container := range containers {
-		// Try to set the default name for a container if it exists prior to links
-		container.Name, err = daemon.generateNewName(container.ID)
-		if err != nil {
-			log.Debugf("Setting default id - %s", err)
-		}
-
-		if err := daemon.register(container, false); err != nil {
-			log.Debugf("Failed to register container %s: %s", container.ID, err)
-		}
-
-		registeredContainers = append(registeredContainers, container)
-	}
-
 	// check the restart policy on the containers and restart any container with
 	// the restart policy of "always"
 	if daemon.config.AutoRestart {
 		log.Debugf("Restarting containers...")
 
-		for _, container := range registeredContainers {
+		for _, container := range daemon.Containers.List() {
 			if container.hostConfig.RestartPolicy.Name == "always" ||
 				(container.hostConfig.RestartPolicy.Name == "on-failure" && container.ExitCode != 0) {
 				log.Debugf("Starting container %s", container.ID)
@@ -395,7 +335,8 @@ func (daemon *Daemon) restore() error {
 		}
 	}
 
-	for _, c := range registeredContainers {
+	// FIXME: do we really need to do this in a separate loop?
+	for _, c := range daemon.Containers.List() {
 		c.registerVolumes()
 	}
 
@@ -515,14 +456,8 @@ func (daemon *Daemon) generateNewName(id string) (string, error) {
 	return name, nil
 }
 
-func (daemon *Daemon) generateHostname(id string, config *runconfig.Config) {
-	// Generate default hostname
-	// FIXME: the lxc template no longer needs to set a default hostname
-	if config.Hostname == "" {
-		config.Hostname = id[:12]
-	}
-}
-
+// FIXME: does this really need to be a class method?
+// How about a well-documented util (or pkg) helper function.
 func (daemon *Daemon) getEntrypointAndArgs(configEntrypoint, configCmd []string) (string, []string) {
 	var (
 		entrypoint string
@@ -572,55 +507,10 @@ func (ncs *NetContainerShim) NSPath() string {
 	return ncs.Container.root + "/netns"
 }
 
+// FIXME: FFS only create the data structure here.
+// There are already 2 other methods (Daemon.ContainerCreate and Daemon.Create) which
+// compete over initializing a container. We don't need a 3d competitor.
 func (daemon *Daemon) newContainer(netid, name string, config *runconfig.Config, img *image.Image) (*Container, error) {
-	var (
-		id  = utils.GenerateRandomID()
-		err error
-	)
-
-	daemon.generateHostname(id, config)
-	entrypoint, args := daemon.getEntrypointAndArgs(config.Entrypoint, config.Cmd)
-
-	container := &Container{
-		// FIXME: we should generate the ID here instead of receiving it as an argument
-		ID:              id,
-		Created:         time.Now().UTC(),
-		Path:            entrypoint,
-		Args:            args, //FIXME: de-duplicate from config
-		Config:          config,
-		hostConfig:      &runconfig.HostConfig{},
-		Image:           img.ID, // Always use the resolved image id
-		NetworkSettings: &NetworkSettings{},
-		// FIXME #networking2.0: name is not a property of the container, but of
-		// network endpoints: each container may be connected to N endpoints
-		// on M networks.
-		Name:         "THIS FIELD IS DEPRECATED AND YOU SHOULD NOT SEE IT",
-		Driver:       daemon.driver.String(),
-		ExecDriver:   daemon.execDriver.Name(),
-		State:        NewState(),
-		execCommands: newExecStore(),
-	}
-	container.root = daemon.containerRoot(container.ID)
-
-	// By default join a network under the specified name
-	if netid == "" {
-		netid = daemon.networks.Default()
-	}
-	n, err := daemon.networks.Get(netid)
-	if err != nil {
-		return nil, err
-	}
-	// FIXME: we don't need the entire container root, just its namespace.
-	// For this we need the persistent namespace patch from lk4d4 and icecrime.
-	// (Otherwise the namespace is not created until the process is started),
-	// and it is lost when the process terminates.
-	// For now we assume the netns will be available at $ROOT/netns
-	if _, err := n.AddEndpoint(&NetContainerShim{container}, name, false); err != nil {
-		return nil, err
-	}
-
-	err = parseSecurityOpt(container, config)
-	return container, err
 }
 
 func (daemon *Daemon) createRootfs(container *Container, img *image.Image) error {

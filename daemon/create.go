@@ -69,10 +69,10 @@ func (daemon *Daemon) ContainerCreate(job *engine.Job) engine.Status {
 // Create creates a new container from the given configuration with a given name.
 func (daemon *Daemon) Create(config *runconfig.Config, hostConfig *runconfig.HostConfig, name string) (*Container, []string, error) {
 	var (
-		container *Container
 		warnings  []string
 	)
 
+	// FIXME: installing images should be done out of band.
 	img, err := daemon.repositories.LookupImage(config.Image)
 	if err != nil {
 		return nil, nil, err
@@ -89,23 +89,105 @@ func (daemon *Daemon) Create(config *runconfig.Config, hostConfig *runconfig.Hos
 			return nil, nil, err
 		}
 	}
-	if container, err = daemon.newContainer("", name, config, img); err != nil {
+	c := &Container{
+		// FIXME: we should generate the ID here instead of receiving it as an argument
+		ID:              utils.GenerateRandomID(),
+		Created:         time.Now().UTC(),
+		Path:            config.Entrypoint,
+		Args:            args, //FIXME: de-duplicate from config
+		Config:          config,
+		hostConfig:      &runconfig.HostConfig{},
+		Image:           img.ID, // Always use the resolved image id
+		NetworkSettings: &NetworkSettings{},
+		Driver:       daemon.driver.String(),
+		ExecDriver:   daemon.execDriver.Name(),
+		State:        NewState(),
+		execCommands: newExecStore(),
+	}
+	// FIXME: find a clean home for this.
+	if config.Hostname == "" {
+		config.Hostname = c.ID[:12]
+	}
+	c.Path, c.Args = daemon.getEntrypointAndArgs(config.Entrypoint, config.Cmd)
+	c.root = daemon.containerRoot(container.ID)
+
+	// FIXME: move this into exec driver
+	if err := parseSecurityOpt(c, config); err != nil {
 		return nil, nil, err
 	}
-	if err := daemon.Register(container); err != nil {
+
+	// FIXME: Register relies on the concept of a single container name.
+	// We are deprecating this concept (only network endpoint have names now).
+	// CONCLUSION -> Register must stop dealing with names
+	if err := daemon.Register(c); err != nil {
 		return nil, nil, err
 	}
-	if err := daemon.createRootfs(container, img); err != nil {
+	if err := daemon.createRootfs(c, img); err != nil {
 		return nil, nil, err
 	}
-	if err := daemon.execDriver.Init(container.ID); err != nil {
+
+	// Initialize sandboxing environment (ie actual kernel namespaces etc.)
+	if err := daemon.execDriver.Init(c.ID); err != nil {
 		return nil, nil, err
 	}
-	if hostConfig != nil {
-		if err := daemon.setHostConfig(container, hostConfig); err != nil {
+
+	////////////////////////////
+	//////////////////////////// BEGIN NEW NETWORKING HOOK
+	// Here we allocate an endpoint for this container on the default network.
+	// This replaces any consideration of "container name"
+	////////////////////////////
+	// By default join a network under the specified name
+
+	netid, err := daemon.networks.Default()
+	if err != nil {
+		return nil, nil, err
+	}
+	defaultNet, err := daemon.networks.Get(netid)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// FIXME: we don't need the entire container root, just its namespace.
+	// For this we need the persistent namespace patch from lk4d4 and icecrime.
+	// (Otherwise the namespace is not created until the process is started),
+	// and it is lost when the process terminates.
+	// For now we assume the netns will be available at $ROOT/netns
+	//
+	// Note: it's ok if name is "". AddEndpoint is responsible for generating a
+	// locally unique name in that case (ie "sad_einstein").
+	//
+	ep, ifaces, err := defaultNet.AddEndpoint(name, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, iface := range ifaces {
+		// FIXME: execdriver must implement a new method AddIface
+		if err := daemon.execdriver.AddIface(iface, container.ID); err != nil {
 			return nil, nil, err
 		}
 	}
+
+	// Expose ports on the new endpoint
+	if container.Config.ExposedPorts != nil {
+		for _, port := range config.ExposedPorts {
+			if err := ep.Expose(port, false); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
+	// *Publish* particular ports as requested in HostConfig
+	if container.hostConfig.PortBindings != nil {
+		for p, b := range container.hostConfig.PortBindings {
+			bindings[p] = []nat.PortBinding{}
+			for _, bb := range b {
+				if err := ep.Expose(p, true); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+	}
+
 	if err := container.ToDisk(); err != nil {
 		return nil, nil, err
 	}
