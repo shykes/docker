@@ -582,11 +582,11 @@ func (daemon *Daemon) newContainer(netid, epid string, config *runconfig.Config,
 		// FIXME #networking2.0: name is not a property of the container, but of
 		// network endpoints: each container may be connected to N endpoints
 		// on M networks.
-		Name:            "THIS FIELD IS DEPRECATED AND YOU SHOULD NOT SEE IT",
-		Driver:          daemon.driver.String(),
-		ExecDriver:      daemon.execDriver.Name(),
-		State:           NewState(),
-		execCommands:    newExecStore(),
+		Name:         "THIS FIELD IS DEPRECATED AND YOU SHOULD NOT SEE IT",
+		Driver:       daemon.driver.String(),
+		ExecDriver:   daemon.execDriver.Name(),
+		State:        NewState(),
+		execCommands: newExecStore(),
 	}
 	container.root = daemon.containerRoot(container.ID)
 
@@ -603,7 +603,7 @@ func (daemon *Daemon) newContainer(netid, epid string, config *runconfig.Config,
 	// (Otherwise the namespace is not created until the process is started),
 	// and it is lost when the process terminates.
 	// For now we assume the netns will be available at $ROOT/netns
-	if err := n.AddEndpoint(container.root + "/netns", name); err != nil {
+	if err := n.AddEndpoint(container.root+"/netns", name); err != nil {
 		return nil, err
 	}
 

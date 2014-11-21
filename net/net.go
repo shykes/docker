@@ -5,7 +5,7 @@ import (
 )
 
 type Networks struct {
-	//FIXME 
+	//FIXME
 	nets map[string]*Network
 }
 
@@ -32,10 +32,9 @@ func (n *Networks) Get(netid string) (*Network, error) {
 	return net, nil
 }
 
-
 type Network struct {
 	endpoints map[string]*Endpoint
-	services map[string]*Service
+	services  map[string]*Service
 }
 
 type Container interface {
@@ -50,7 +49,7 @@ func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint
 	// FIXME: check for name conflict, look at <replace> to determine behavior.
 	ep := &Endpoint{
 		name: name,
-		c: c,
+		c:    c,
 	}
 	// FIXME: here, go over extensions, call AddEndpoint, place interfaces
 	// in ns, apply configuration, etc.
@@ -63,15 +62,15 @@ func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint
 type Endpoint struct {
 	name string
 	addr []net.IP
-	c Container
+	c    Container
 	// FIXME: per-endpoint port filtering as an advanced feature?
 }
 
 type Service struct {
-	name string
+	name    string
 	backend *Endpoint
-	proto string // "tcp" or "udp"
-	port uint16
+	proto   string // "tcp" or "udp"
+	port    uint16
 }
 
 type PortSet interface {
@@ -82,7 +81,6 @@ type PortSet interface {
 	// This is similar to daemon/networkdriver/portallocator/protoMap
 	// but without the baggage.
 }
-
 
 func (n *Networks) Install(eng e.Engine) error {
 	eng.Register("net_create", n.CmdCreate)
@@ -95,7 +93,6 @@ func (n *Networks) Install(eng e.Engine) error {
 	return nil
 }
 
-
 func (n *Networks) CmdCreate(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
 		return j.Errorf("usage: %s NAME", j.Name)
@@ -103,7 +100,6 @@ func (n *Networks) CmdCreate(j *e.Job) e.Status {
 	// FIXME
 	return e.StatusOK
 }
-
 
 func (n *Networks) CmdLs(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
@@ -113,7 +109,6 @@ func (n *Networks) CmdLs(j *e.Job) e.Status {
 	return e.StatusOK
 }
 
-
 func (n *Networks) CmdRm(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
 		return j.Errorf("usage: %s NAME", j.Name)
@@ -122,7 +117,6 @@ func (n *Networks) CmdRm(j *e.Job) e.Status {
 	return e.StatusOK
 }
 
-
 func (n *Networks) CmdJoin(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
 		return j.Errorf("usage: %s NAME", j.Name)
@@ -130,7 +124,6 @@ func (n *Networks) CmdJoin(j *e.Job) e.Status {
 	// FIXME
 	return e.StatusOK
 }
-
 
 func (n *Networks) CmdLeave(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
