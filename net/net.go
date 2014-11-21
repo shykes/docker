@@ -1,14 +1,15 @@
 package net
 
 import (
-	"os"
+	"fmt"
 
 	e "github.com/docker/docker/engine"
 )
 
 type Networks struct {
 	//FIXME
-	nets map[string]*Network
+	nets           map[string]*Network
+	defaultNetwork string
 }
 
 func New(root string) (*Networks, error) {
@@ -20,18 +21,25 @@ func New(root string) (*Networks, error) {
 	}, nil
 }
 
+func (n *Networks) SetDefault(netid string) {
+	n.defaultNetwork = netid
+}
+
 func (n *Networks) Default() string {
-	// FIXME
-	return "THE PLUMBING IS NOT YET IN PLACE TO SELECT A DEFAULT NETWORK"
+	return n.defaultNetwork
 }
 
 func (n *Networks) Get(netid string) (*Network, error) {
 	// FIXME
 	net, ok := n.nets[netid]
 	if !ok {
-		return nil, os.ErrNotExist
+		return nil, fmt.Errorf("No such network: %s", netid)
 	}
 	return net, nil
+}
+
+func (n *Networks) Set(netid string, net *Network) {
+	n.nets[netid] = net
 }
 
 type Network struct {
@@ -42,6 +50,13 @@ type Network struct {
 type Container interface {
 	NSPath() string
 	PortSet
+}
+
+func NewNetwork() *Network {
+	return &Network{
+		endpoints: make(map[string]*Endpoint),
+		services:  make(map[string]*Service),
+	}
 }
 
 func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint, error) {
