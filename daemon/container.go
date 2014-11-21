@@ -474,7 +474,6 @@ func (container *Container) AllocateNetwork() error {
 	}
 
 	var (
-		env *engine.Env
 		err error
 		eng = container.daemon.eng
 	)
@@ -491,14 +490,14 @@ func (container *Container) AllocateNetwork() error {
 		}
 	}
 
-	job := eng.Job("allocate_interface", container.ID)
-	job.Setenv("RequestedMac", container.Config.MacAddress)
-	if env, err = job.Stdout.AddEnv(); err != nil {
-		return err
-	}
-	if err = job.Run(); err != nil {
-		return err
-	}
+	//job := eng.Job("allocate_interface", container.ID)
+	//job.Setenv("RequestedMac", container.Config.MacAddress)
+	//if env, err = job.Stdout.AddEnv(); err != nil {
+	//return err
+	//}
+	//if err = job.Run(); err != nil {
+	//return err
+	//}
 
 	// Error handling: At this point, the interface is allocated so we have to
 	// make sure that it is always released in case of error, otherwise we
@@ -547,12 +546,12 @@ func (container *Container) AllocateNetwork() error {
 	}
 	container.WriteHostConfig()
 
-	container.NetworkSettings.Ports = bindings
-	container.NetworkSettings.Bridge = env.Get("Bridge")
-	container.NetworkSettings.IPAddress = env.Get("IP")
-	container.NetworkSettings.IPPrefixLen = env.GetInt("IPPrefixLen")
-	container.NetworkSettings.MacAddress = env.Get("MacAddress")
-	container.NetworkSettings.Gateway = env.Get("Gateway")
+	//container.NetworkSettings.Ports = bindings
+	//container.NetworkSettings.Bridge = env.Get("Bridge")
+	//container.NetworkSettings.IPAddress = env.Get("IP")
+	//container.NetworkSettings.IPPrefixLen = env.GetInt("IPPrefixLen")
+	//container.NetworkSettings.MacAddress = env.Get("MacAddress")
+	//container.NetworkSettings.Gateway = env.Get("Gateway")
 
 	return nil
 }

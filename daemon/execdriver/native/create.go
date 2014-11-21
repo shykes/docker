@@ -105,27 +105,27 @@ func (d *driver) createNetwork(container *libcontainer.Config, c *execdriver.Com
 		return nil
 	}
 
-	container.Networks = []*libcontainer.Network{
-		{
-			Mtu:     c.Network.Mtu,
-			Address: fmt.Sprintf("%s/%d", "127.0.0.1", 0),
-			Gateway: "localhost",
-			Type:    "loopback",
-		},
-	}
+	//container.Networks = []*libcontainer.Network{
+	//{
+	//Mtu:     c.Network.Mtu,
+	//Address: fmt.Sprintf("%s/%d", "127.0.0.1", 0),
+	//Gateway: "localhost",
+	//Type:    "loopback",
+	//},
+	//}
 
-	if c.Network.Interface != nil {
-		vethNetwork := libcontainer.Network{
-			Mtu:        c.Network.Mtu,
-			Address:    fmt.Sprintf("%s/%d", c.Network.Interface.IPAddress, c.Network.Interface.IPPrefixLen),
-			MacAddress: c.Network.Interface.MacAddress,
-			Gateway:    c.Network.Interface.Gateway,
-			Type:       "veth",
-			Bridge:     c.Network.Interface.Bridge,
-			VethPrefix: "veth",
-		}
-		container.Networks = append(container.Networks, &vethNetwork)
-	}
+	//if c.Network.Interface != nil {
+	//vethNetwork := libcontainer.Network{
+	//Mtu:        c.Network.Mtu,
+	//Address:    fmt.Sprintf("%s/%d", c.Network.Interface.IPAddress, c.Network.Interface.IPPrefixLen),
+	//MacAddress: c.Network.Interface.MacAddress,
+	//Gateway:    c.Network.Interface.Gateway,
+	//Type:       "veth",
+	//Bridge:     c.Network.Interface.Bridge,
+	//VethPrefix: "veth",
+	//}
+	//container.Networks = append(container.Networks, &vethNetwork)
+	//}
 
 	if c.Network.ContainerID != "" {
 		d.Lock()
@@ -142,8 +142,14 @@ func (d *driver) createNetwork(container *libcontainer.Config, c *execdriver.Com
 			Type:   "netns",
 			NsPath: nspath,
 		})
+		return nil
 	}
 
+	nsPath := d.NetNsPath(c.ID)
+	container.Networks = append(container.Networks, &libcontainer.Network{
+		Type:   "netns",
+		NsPath: nsPath,
+	})
 	return nil
 }
 
