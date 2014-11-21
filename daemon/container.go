@@ -479,17 +479,18 @@ func (container *Container) AllocateNetwork() error {
 		eng = container.daemon.eng
 	)
 
-	ifaces, err := container.daemon.networkDriver.AddEndpoint("", container.ID, map[string]string{"Mac": container.Config.MacAddress})
-	log.Errorf("Interfaces: %v", ifaces)
-	container.Interfaces = ifaces
+	// FIXME Use net.Networks
+	//ifaces, err := container.daemon.networks.AddEndpoint("", container.ID, map[string]string{"Mac": container.Config.MacAddress})
+	//log.Errorf("Interfaces: %v", ifaces)
+	//container.Interfaces = ifaces
 
-	nsPath := container.daemon.execDriver.NetNsPath(container.ID)
-	for _, iface := range ifaces {
-		log.Errorf("Here should be setup of %s in %s", iface, nsPath)
-		if err := iface.Setup(nsPath); err != nil {
-			return err
-		}
-	}
+	//nsPath := container.daemon.execDriver.NetNsPath(container.ID)
+	//for _, iface := range ifaces {
+	//	log.Errorf("Here should be setup of %s in %s", iface, nsPath)
+	//	if err := iface.Setup(nsPath); err != nil {
+	//		return err
+	//	}
+	//}
 
 	job := eng.Job("allocate_interface", container.ID)
 	job.Setenv("RequestedMac", container.Config.MacAddress)
@@ -713,7 +714,10 @@ func (container *Container) Stop(seconds int) error {
 			return err
 		}
 	}
-	return container.daemon.networkDriver.RemoveEndpoint(container.ID)
+
+	// FIXME Use net.Networks
+	//return container.daemon.networks.RemoveEndpoint(container.ID)
+	return nil
 }
 
 func (container *Container) Restart(seconds int) error {

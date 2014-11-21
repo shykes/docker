@@ -1175,6 +1175,14 @@ func postContainerExecResize(eng *engine.Engine, version version.Version, w http
 	return nil
 }
 
+func jobEnvFromList() {
+}
+
+func getNetworksList(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	// TODO
+	return nil
+}
+
 func optionsHandler(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	w.WriteHeader(http.StatusOK)
 	return nil
@@ -1277,6 +1285,7 @@ func createRouter(eng *engine.Engine, logging, enableCors bool, dockerVersion st
 			"/containers/{name:.*}/top":       getContainersTop,
 			"/containers/{name:.*}/logs":      getContainersLogs,
 			"/containers/{name:.*}/attach/ws": wsContainersAttach,
+			"/cmd/net_ls":                     httpCmd,
 		},
 		"POST": {
 			"/auth":                         postAuth,
@@ -1300,13 +1309,12 @@ func createRouter(eng *engine.Engine, logging, enableCors bool, dockerVersion st
 			"/containers/{name:.*}/exec":    postContainerExecCreate,
 			"/exec/{name:.*}/start":         postContainerExecStart,
 			"/exec/{name:.*}/resize":        postContainerExecResize,
-			"/cmd/net_ls":                   postCmd,
-			"/cmd/net_create":               postCmd,
-			"/cmd/net_rm":                   postCmd,
-			"/cmd/net_join":                 postCmd,
-			"/cmd/net_leave":                postCmd,
-			"/cmd/net_import":               postCmd,
-			"/cmd/net_export":               postCmd,
+			"/cmd/net_create":               httpCmd,
+			"/cmd/net_export":               httpCmd,
+			"/cmd/net_import":               httpCmd,
+			"/cmd/net_join":                 httpCmd,
+			"/cmd/net_leave":                httpCmd,
+			"/cmd/net_rm":                   httpCmd,
 		},
 		"DELETE": {
 			"/containers/{name:.*}": deleteContainers,

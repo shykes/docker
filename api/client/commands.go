@@ -2611,3 +2611,41 @@ func (cli *DockerCli) CmdExec(args ...string) error {
 
 	return nil
 }
+
+func (cli *DockerCli) CmdNetworkAttach(args ...string) error {
+	cmd := cli.Subcmd("network attach", "", "Attach an container to a network")
+	cmd.Usage()
+	return nil
+}
+
+func (cli *DockerCli) CmdNetworkCreate(args ...string) error {
+	cmd := cli.Subcmd("network create", "", "Create a new network")
+	if err := cmd.Parse(args); err != nil {
+		return nil
+	}
+
+	var flExtensionOpts []string
+	opts.ListVar(&flExtensionOpts, []string{"-extension-opt"}, "Extension specific option to be passed (option=value)")
+	flExtension := cmd.String([]string{"-extension"}, "", "Name of the extension reponsible for creating the network")
+
+	// Network settings are passed as provided: the dameon will take care of
+	// the parsing work (such as splitting on '=' for extension-opt).
+	networkSettings := url.Values{}
+	networkSettings.Set("extension", *flExtension)
+	for _, driverOpt := range flExtensionOpts {
+		networkSettings.Add("extension-opt", driverOpt)
+	}
+
+	if _, _, err := readBody(cli.call("POST", "/networks/create?"+networkSettings.Encode(), nil, false)); err != nil {
+		fmt.Fprintf(cli.err, "%s\n", err)
+		return fmt.Errorf("Error: failed to create network")
+	}
+
+	return nil
+}
+
+func (cli *DockerCli) CmdNetworkDelete(args ...string) error {
+	cmd := cli.Subcmd("network delete", "", "Remove an existing network")
+	cmd.Usage()
+	return nil
+}
