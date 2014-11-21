@@ -38,12 +38,12 @@ bdfl = "shykes"
 
 
 	people = [
-		"tibor",
-		"jfrazelle",
-		"crosbymichael",
-		"vieux",
 		"backjlack",
+		"crosbymichael",
 		"erikh"
+		"jfrazelle",
+		"tibor",
+		"vieux",
 	]
 
 	lead = "crosbymichael"
@@ -92,9 +92,9 @@ bdfl = "shykes"
 	[Subsystems.Documentation]
 
 		people = [
-			"sven",
 			"fredlf",
 			"james"
+			"sven",
 		]
 
 		lead = "fredlf"
@@ -119,9 +119,9 @@ bdfl = "shykes"
 	[Subsystems.registry]
 
 		people = [
-			"samalba",
 			"dmp42",
 			"joffrey"
+			"samalba",
 		]
 
 		lead = "dmp42"
@@ -157,22 +157,24 @@ bdfl = "shykes"
 # All other sections should refer to people by their canonical key
 # in the people section.
 
-	[people.shykes]
-
-	Name = "Solomon Hykes"
-	Email = "solomon@docker.com"
-	Github = "shykes"
+	# ADD YOURSELF HERE IN ALPHABETICAL ORDER
 
 	[people.erikh]
-
 	Name = "Erik Hollensbe"
 	Email = "erik@docker.com"
 	Github = "erikh"
 
-	# ADD YOURSELF HERE
+	[people.shykes]
+	Name = "Solomon Hykes"
+	Email = "solomon@docker.com"
+	Github = "shykes"
+
+	[people.tibor]
+	Name = "Tibor Vass"
+	Email = "tibor@docker.com"
+	Github = "tiborvass"
 
 	[people.vieux]
-
 	Name = "Victor Vieux"
 	Email = "vieux@docker.com"
 	Github = "vieux"
