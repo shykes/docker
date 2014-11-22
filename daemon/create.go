@@ -89,6 +89,7 @@ func (daemon *Daemon) Create(config *runconfig.Config, hostConfig *runconfig.Hos
 			return nil, nil, err
 		}
 	}
+	// TODO Provide proper ID
 	if container, err = daemon.newContainer("", name, config, img); err != nil {
 		return nil, nil, err
 	}

@@ -24,11 +24,10 @@ import (
 	"github.com/docker/docker/daemon/networkdriver/portallocator"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/engine"
+	"github.com/docker/docker/extensions"
 	"github.com/docker/docker/graph"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/net"
-	"github.com/docker/docker/network"
-	"github.com/docker/docker/network/veth"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/broadcastwriter"
 	"github.com/docker/docker/pkg/graphdb"
@@ -102,7 +101,6 @@ type Daemon struct {
 	driver         graphdriver.Driver
 	execDriver     execdriver.Driver
 	trustStore     *trust.TrustStore
-	networkDriver  network.Driver
 }
 
 // Install installs daemon capabilities to eng.
@@ -573,16 +571,15 @@ func (ncs *NetContainerShim) NSPath() string {
 }
 
 func (daemon *Daemon) newContainer(netid, name string, config *runconfig.Config, img *image.Image) (*Container, error) {
-	var (
-		id  = utils.GenerateRandomID()
-		err error
-	)
+	id, name, err := daemon.generateIdAndName("")
+	if err != nil {
+		return nil, err
+	}
 
 	daemon.generateHostname(id, config)
 	entrypoint, args := daemon.getEntrypointAndArgs(config.Entrypoint, config.Cmd)
 
 	container := &Container{
-		// FIXME: we should generate the ID here instead of receiving it as an argument
 		ID:              id,
 		Created:         time.Now().UTC(),
 		Path:            entrypoint,
@@ -610,12 +607,13 @@ func (daemon *Daemon) newContainer(netid, name string, config *runconfig.Config,
 	if err != nil {
 		return nil, err
 	}
+
 	// FIXME: we don't need the entire container root, just its namespace.
 	// For this we need the persistent namespace patch from lk4d4 and icecrime.
 	// (Otherwise the namespace is not created until the process is started),
 	// and it is lost when the process terminates.
 	// For now we assume the netns will be available at $ROOT/netns
-	if _, err := n.AddEndpoint(&NetContainerShim{container}, name, false); err != nil {
+	if err := n.AddEndpoint(&NetContainerShim{container}, name); err != nil {
 		return nil, err
 	}
 
@@ -864,12 +862,9 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		return nil, err
 	}
 
-	networks, err := net.New("")
-	if err != nil {
-		return nil, err
-	}
-	networks.Set("default", net.NewNetwork())
-	networks.SetDefault("default")
+	// TODO
+	var state extensions.State
+	networks := net.New(state)
 
 	log.Debugf("Creating repository list")
 	repositories, err := graph.NewTagStore(path.Join(config.Root, "repositories-"+driver.String()), g, config.Mirrors, config.InsecureRegistries)
@@ -886,32 +881,31 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		return nil, fmt.Errorf("could not create trust store: %s", err)
 	}
 
-	var netDriver network.Driver
+	// FIXME Initalize inside extension
+	// if !config.DisableNetwork {
+	// 	netCfg := veth.Config{
+	// 		Iface:          config.BridgeIface,
+	// 		EnableIPTables: config.EnableIptables,
+	// 		ICC:            config.InterContainerCommunication,
+	// 		IPMasq:         config.EnableIpMasq,
+	// 		IPForward:      config.EnableIpForward,
+	// 		CIDR:           config.BridgeIP,
+	// 		FixedCIDR:      config.FixedCIDR,
+	// 	}
+	// 	bridge, err := veth.New(netCfg)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	job := eng.Job("init_networkdriver")
+	// 	job.Setenv("BridgeIface", bridge.Iface)
+	// 	job.Setenv("BridgeNet", bridge.Net.String())
+	// 	job.Setenv("DefaultBindingIP", config.DefaultIp.String())
 
-	if !config.DisableNetwork {
-		netCfg := veth.Config{
-			Iface:          config.BridgeIface,
-			EnableIPTables: config.EnableIptables,
-			ICC:            config.InterContainerCommunication,
-			IPMasq:         config.EnableIpMasq,
-			IPForward:      config.EnableIpForward,
-			CIDR:           config.BridgeIP,
-			FixedCIDR:      config.FixedCIDR,
-		}
-		bridge, err := veth.New(netCfg)
-		if err != nil {
-			return nil, err
-		}
-		job := eng.Job("init_networkdriver")
-		job.Setenv("BridgeIface", bridge.Iface)
-		job.Setenv("BridgeNet", bridge.Net.String())
-		job.Setenv("DefaultBindingIP", config.DefaultIp.String())
-
-		if err := job.Run(); err != nil {
-			return nil, err
-		}
-		netDriver = bridge
-	}
+	// 	if err := job.Run(); err != nil {
+	// 		return nil, err
+	// 	}
+	// 	netDriver = bridge
+	// }
 
 	graphdbPath := path.Join(config.Root, "linkgraph.db")
 	graph, err := graphdb.NewSqliteConn(graphdbPath)
@@ -962,7 +956,6 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		execDriver:     ed,
 		eng:            eng,
 		trustStore:     t,
-		networkDriver:  netDriver,
 	}
 	if err := daemon.restore(); err != nil {
 		return nil, err
