@@ -903,6 +903,8 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 			return nil, err
 		}
 		job := eng.Job("init_networkdriver")
+
+		job.Setenv("VXLANPeer", config.VXLANPeer)
 		job.Setenv("BridgeIface", bridge.Iface)
 		job.Setenv("BridgeNet", bridge.Net.String())
 		job.Setenv("DefaultBindingIP", config.DefaultIp.String())

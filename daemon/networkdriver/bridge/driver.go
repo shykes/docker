@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"net"
+	"os/exec"
 	"strconv"
 	"sync"
 
@@ -87,6 +88,22 @@ func InitDriver(job *engine.Job) engine.Status {
 
 	// https://github.com/docker/docker/issues/2768
 	job.Eng.Hack_SetGlobalVar("httpapi.bridgeIP", bridgeNetwork.IP)
+
+	vxlanPeer := job.Getenv("VXLANPeer")
+
+	if vxlanPeer != "" {
+		if err := exec.Command("/sbin/ip", "link", "add", "vxlan0", "type", "vxlan", "id", "42", "remote", vxlanPeer).Run(); err != nil {
+			return job.Error(err)
+		}
+
+		if err := exec.Command("/sbin/ip", "link", "set", "vxlan0", "up").Run(); err != nil {
+			return job.Error(err)
+		}
+
+		if err := exec.Command("brctl", "addif", iface, "vxlan0").Run(); err != nil {
+			return job.Error(err)
+		}
+	}
 
 	for name, f := range map[string]engine.Handler{
 		"allocate_interface": Allocate,
