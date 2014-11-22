@@ -1,12 +1,15 @@
 package net
 
 import (
+	"fmt"
+
 	e "github.com/docker/docker/engine"
 )
 
 type Networks struct {
-	//FIXME 
-	nets map[string]*Network
+	//FIXME
+	nets           map[string]*Network
+	defaultNetwork string
 }
 
 func New(root string) (*Networks, error) {
@@ -18,29 +21,42 @@ func New(root string) (*Networks, error) {
 	}, nil
 }
 
+func (n *Networks) SetDefault(netid string) {
+	n.defaultNetwork = netid
+}
+
 func (n *Networks) Default() string {
-	// FIXME
-	return "THE PLUMBING IS NOT YET IN PLACE TO SELECT A DEFAULT NETWORK"
+	return n.defaultNetwork
 }
 
 func (n *Networks) Get(netid string) (*Network, error) {
 	// FIXME
 	net, ok := n.nets[netid]
-	if ok != nil {
-		return nil, os.ErrNotExist{}
+	if !ok {
+		return nil, fmt.Errorf("No such network: %s", netid)
 	}
 	return net, nil
 }
 
+func (n *Networks) Set(netid string, net *Network) {
+	n.nets[netid] = net
+}
 
 type Network struct {
 	endpoints map[string]*Endpoint
-	services map[string]*Service
+	services  map[string]*Service
 }
 
 type Container interface {
 	NSPath() string
 	PortSet
+}
+
+func NewNetwork() *Network {
+	return &Network{
+		endpoints: make(map[string]*Endpoint),
+		services:  make(map[string]*Service),
+	}
 }
 
 func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint, error) {
@@ -50,7 +66,7 @@ func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint
 	// FIXME: check for name conflict, look at <replace> to determine behavior.
 	ep := &Endpoint{
 		name: name,
-		c: c,
+		c:    c,
 	}
 	// FIXME: here, go over extensions, call AddEndpoint, place interfaces
 	// in ns, apply configuration, etc.
@@ -62,16 +78,18 @@ func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint
 
 type Endpoint struct {
 	name string
-	addr []net.IP
-	c Container
+	addr []IP
+	c    Container
 	// FIXME: per-endpoint port filtering as an advanced feature?
 }
 
+type IP string
+
 type Service struct {
-	name string
+	name    string
 	backend *Endpoint
-	proto string // "tcp" or "udp"
-	port uint16
+	proto   string // "tcp" or "udp"
+	port    uint16
 }
 
 type PortSet interface {
@@ -83,8 +101,7 @@ type PortSet interface {
 	// but without the baggage.
 }
 
-
-func (n *Networks) Install(eng e.Engine) error {
+func (n *Networks) Install(eng *e.Engine) error {
 	eng.Register("net_create", n.CmdCreate)
 	eng.Register("net_rm", n.CmdRm)
 	eng.Register("net_ls", n.CmdLs)
@@ -95,7 +112,6 @@ func (n *Networks) Install(eng e.Engine) error {
 	return nil
 }
 
-
 func (n *Networks) CmdCreate(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
 		return j.Errorf("usage: %s NAME", j.Name)
@@ -103,7 +119,6 @@ func (n *Networks) CmdCreate(j *e.Job) e.Status {
 	// FIXME
 	return e.StatusOK
 }
-
 
 func (n *Networks) CmdLs(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
@@ -113,7 +128,6 @@ func (n *Networks) CmdLs(j *e.Job) e.Status {
 	return e.StatusOK
 }
 
-
 func (n *Networks) CmdRm(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
 		return j.Errorf("usage: %s NAME", j.Name)
@@ -122,7 +136,6 @@ func (n *Networks) CmdRm(j *e.Job) e.Status {
 	return e.StatusOK
 }
 
-
 func (n *Networks) CmdJoin(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
 		return j.Errorf("usage: %s NAME", j.Name)
@@ -130,7 +143,6 @@ func (n *Networks) CmdJoin(j *e.Job) e.Status {
 	// FIXME
 	return e.StatusOK
 }
-
 
 func (n *Networks) CmdLeave(j *e.Job) e.Status {
 	if len(j.Args) != 1 {

@@ -89,7 +89,7 @@ func (daemon *Daemon) Create(config *runconfig.Config, hostConfig *runconfig.Hos
 			return nil, nil, err
 		}
 	}
-	if container, err = daemon.newContainer(name, config, img); err != nil {
+	if container, err = daemon.newContainer("", name, config, img); err != nil {
 		return nil, nil, err
 	}
 	if err := daemon.Register(container); err != nil {
