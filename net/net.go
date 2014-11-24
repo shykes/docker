@@ -121,10 +121,18 @@ func (n *Networks) CmdCreate(j *e.Job) e.Status {
 }
 
 func (n *Networks) CmdLs(j *e.Job) e.Status {
-	if len(j.Args) != 1 {
-		return j.Errorf("usage: %s NAME", j.Name)
+	networks := e.NewTable("Name", len(n.nets))
+
+	for name, _ := range n.nets {
+		network := &e.Env{}
+		network.Set("Name", name)
+		networks.Add(network)
 	}
-	// FIXME
+
+	if _, err := networks.WriteTo(j.Stdout); err != nil {
+		return j.Error(err)
+	}
+
 	return e.StatusOK
 }
 

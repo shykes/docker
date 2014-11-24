@@ -2611,3 +2611,56 @@ func (cli *DockerCli) CmdExec(args ...string) error {
 
 	return nil
 }
+
+func (cli *DockerCli) CmdNets(args ...string) error {
+	description := "Manage networks\n\nCommands:\n"
+	for _, command := range [][]string{
+		{"ls", "List networks"},
+	} {
+		description += fmt.Sprintf("    %-15.10s%s\n", command[0], command[1])
+	}
+
+	description += "\nRun `docker nets SUBCOMMAND --help` for more information on a subcommand."
+
+	cmd := cli.Subcmd("groups", "[SUBCOMMAND]", description)
+
+	if err := cmd.Parse(args); err != nil {
+		return err
+	}
+
+	if cmd.NArg() == 0 {
+		return cli.CmdNetsLs(args...)
+	}
+
+	cmd.Usage()
+	return nil
+}
+
+func (cli *DockerCli) CmdNetsLs(args ...string) error {
+	cmd := cli.Subcmd("nets ls", "", "List networks")
+
+	if err := cmd.Parse(args); err != nil {
+		return err
+	}
+
+	apiCmd := &api.Cmd{
+		Name: "net_ls",
+	}
+
+	response, _, err := cli.call("POST", "/cmd", apiCmd, true)
+	if err != nil {
+		return err
+	}
+	defer response.Close()
+
+	nets := engine.NewTable("Name", 0)
+	if _, err := nets.ReadFrom(response); err != nil {
+		return err
+	}
+
+	for _, n := range nets.Data {
+		fmt.Fprintf(cli.out, "%s\n", n.Get("Name"))
+	}
+
+	return nil
+}
