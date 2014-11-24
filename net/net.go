@@ -47,6 +47,15 @@ func (n *Networks) Set(netid string, net *Network) error {
 	return nil
 }
 
+func (n *Networks) Delete(netid string) error {
+	if _, exists := n.nets[netid]; !exists {
+		return fmt.Errorf("No such network: %#v", netid)
+	}
+
+	delete(n.nets, netid)
+	return nil
+}
+
 type Network struct {
 	endpoints map[string]*Endpoint
 	services  map[string]*Service
@@ -150,7 +159,11 @@ func (n *Networks) CmdRm(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
 		return j.Errorf("usage: %s NAME", j.Name)
 	}
-	// FIXME
+
+	if err := n.Delete(j.Args[0]); err != nil {
+		return j.Error(err)
+	}
+
 	return e.StatusOK
 }
 
