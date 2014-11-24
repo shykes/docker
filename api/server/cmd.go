@@ -21,7 +21,8 @@ func postCmd(eng *engine.Engine, version version.Version, w http.ResponseWriter,
 
 	job := eng.Job(cmd.Name, cmd.Args...)
 	job.Stdout.Add(w)
-	job.Stderr.Add(w)
+	// FIXME: @aanand - find out why this makes error responses go wrong
+	// job.Stderr.Add(w)
 
 	if err := job.ImportEnv(cmd.Env); err != nil {
 		return err
