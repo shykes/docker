@@ -38,8 +38,13 @@ func (n *Networks) Get(netid string) (*Network, error) {
 	return net, nil
 }
 
-func (n *Networks) Set(netid string, net *Network) {
+func (n *Networks) Set(netid string, net *Network) error {
+	if _, exists := n.nets[netid]; exists {
+		return fmt.Errorf("Network name %#v is already taken", netid)
+	}
+
 	n.nets[netid] = net
+	return nil
 }
 
 type Network struct {
@@ -116,7 +121,12 @@ func (n *Networks) CmdCreate(j *e.Job) e.Status {
 	if len(j.Args) != 1 {
 		return j.Errorf("usage: %s NAME", j.Name)
 	}
-	// FIXME
+
+	net := NewNetwork()
+	if err := n.Set(j.Args[0], net); err != nil {
+		return j.Error(err)
+	}
+
 	return e.StatusOK
 }
 

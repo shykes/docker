@@ -2615,6 +2615,7 @@ func (cli *DockerCli) CmdExec(args ...string) error {
 func (cli *DockerCli) CmdNets(args ...string) error {
 	description := "Manage networks\n\nCommands:\n"
 	for _, command := range [][]string{
+		{"create", "Create a network"},
 		{"ls", "List networks"},
 	} {
 		description += fmt.Sprintf("    %-15.10s%s\n", command[0], command[1])
@@ -2633,6 +2634,32 @@ func (cli *DockerCli) CmdNets(args ...string) error {
 	}
 
 	cmd.Usage()
+	return nil
+}
+
+func (cli *DockerCli) CmdNetsCreate(args ...string) error {
+	cmd := cli.Subcmd("nets create", "NAME", "Create a network")
+
+	if err := cmd.Parse(args); err != nil {
+		return err
+	}
+
+	if cmd.NArg() != 1 {
+		cmd.Usage()
+		return nil
+	}
+
+	apiCmd := &api.Cmd{
+		Name: "net_create",
+		Args: cmd.Args(),
+	}
+
+	if _, _, err := cli.call("POST", "/cmd", apiCmd, true); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(cli.out, "%s\n", cmd.Arg(0))
+
 	return nil
 }
 
