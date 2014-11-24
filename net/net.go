@@ -8,16 +8,18 @@ import (
 
 type Networks struct {
 	//FIXME
+	getContainer   func(string) (Container, error)
 	nets           map[string]*Network
 	defaultNetwork string
 }
 
-func New(root string) (*Networks, error) {
+func New(getContainer func(string) (Container, error), root string) (*Networks, error) {
 	// FIXME: instead of passing root, daemon could pass a pre-allocated
 	// State. Then other subsystems could start using State... :)
 	// One step at a time.
 	return &Networks{
-		nets: make(map[string]*Network),
+		getContainer: getContainer,
+		nets:         make(map[string]*Network),
 	}, nil
 }
 
@@ -77,7 +79,13 @@ func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint
 	if name == "" {
 		// FIXME: generate and reserve a random name
 	}
-	// FIXME: check for name conflict, look at <replace> to determine behavior.
+
+	if _, exists := n.endpoints[name]; exists {
+		if !replace {
+			return nil, fmt.Errorf("Endpoint name %#v is already taken", name)
+		}
+	}
+
 	ep := &Endpoint{
 		name: name,
 		c:    c,
@@ -88,6 +96,15 @@ func (n *Network) AddEndpoint(c Container, name string, replace bool) (*Endpoint
 	// later.
 	n.endpoints[name] = ep
 	return ep, nil
+}
+
+func (n *Network) RemoveEndpoint(name string) error {
+	if _, exists := n.endpoints[name]; !exists {
+		return fmt.Errorf("No such endpoint: %#v", name)
+	}
+
+	delete(n.endpoints, name)
+	return nil
 }
 
 type Endpoint struct {
@@ -168,18 +185,41 @@ func (n *Networks) CmdRm(j *e.Job) e.Status {
 }
 
 func (n *Networks) CmdJoin(j *e.Job) e.Status {
-	if len(j.Args) != 1 {
-		return j.Errorf("usage: %s NAME", j.Name)
+	if len(j.Args) != 3 {
+		return j.Errorf("usage: %s NETWORK CONTAINER NAME", j.Name)
 	}
-	// FIXME
+
+	net, err := n.Get(j.Args[0])
+	if err != nil {
+		return j.Error(err)
+	}
+
+	container, err := n.getContainer(j.Args[1])
+	if err != nil {
+		return j.Error(err)
+	}
+
+	if _, err := net.AddEndpoint(container, j.Args[2], false); err != nil {
+		return j.Error(err)
+	}
+
 	return e.StatusOK
 }
 
 func (n *Networks) CmdLeave(j *e.Job) e.Status {
-	if len(j.Args) != 1 {
-		return j.Errorf("usage: %s NAME", j.Name)
+	if len(j.Args) != 2 {
+		return j.Errorf("usage: %s NETWORK NAME", j.Name)
 	}
-	// FIXME
+
+	net, err := n.Get(j.Args[0])
+	if err != nil {
+		return j.Error(err)
+	}
+
+	if err := net.RemoveEndpoint(j.Args[1]); err != nil {
+		return j.Error(err)
+	}
+
 	return e.StatusOK
 }
 

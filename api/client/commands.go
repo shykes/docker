@@ -2616,6 +2616,8 @@ func (cli *DockerCli) CmdNets(args ...string) error {
 	description := "Manage networks\n\nCommands:\n"
 	for _, command := range [][]string{
 		{"create", "Create a network"},
+		{"join", "Add a container to a network"},
+		{"leave", "Remove a container from a network"},
 		{"ls", "List networks"},
 		{"rm", "Remove a network"},
 	} {
@@ -2660,6 +2662,54 @@ func (cli *DockerCli) CmdNetsCreate(args ...string) error {
 	}
 
 	fmt.Fprintf(cli.out, "%s\n", cmd.Arg(0))
+
+	return nil
+}
+
+func (cli *DockerCli) CmdNetsJoin(args ...string) error {
+	cmd := cli.Subcmd("nets join", "NETWORK CONTAINER NAME", "Add a container to a network")
+
+	if err := cmd.Parse(args); err != nil {
+		return err
+	}
+
+	if cmd.NArg() != 3 {
+		cmd.Usage()
+		return nil
+	}
+
+	apiCmd := &api.Cmd{
+		Name: "net_join",
+		Args: cmd.Args(),
+	}
+
+	if _, _, err := cli.call("POST", "/cmd", apiCmd, true); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (cli *DockerCli) CmdNetsLeave(args ...string) error {
+	cmd := cli.Subcmd("nets leave", "NETWORK NAME", "Remove a container from a network")
+
+	if err := cmd.Parse(args); err != nil {
+		return err
+	}
+
+	if cmd.NArg() != 2 {
+		cmd.Usage()
+		return nil
+	}
+
+	apiCmd := &api.Cmd{
+		Name: "net_leave",
+		Args: cmd.Args(),
+	}
+
+	if _, _, err := cli.call("POST", "/cmd", apiCmd, true); err != nil {
+		return err
+	}
 
 	return nil
 }
