@@ -40,6 +40,7 @@ type Config struct {
 	DisableNetwork              bool
 	EnableSelinuxSupport        bool
 	Context                     map[string][]string
+	VXLANPeer                   string
 }
 
 // InstallFlags adds command-line options to the top-level flag parser for
@@ -68,6 +69,7 @@ func (config *Config) InstallFlags() {
 	opts.IPListVar(&config.Dns, []string{"#dns", "-dns"}, "Force Docker to use specific DNS servers")
 	opts.DnsSearchListVar(&config.DnsSearch, []string{"-dns-search"}, "Force Docker to use specific DNS search domains")
 	opts.MirrorListVar(&config.Mirrors, []string{"-registry-mirror"}, "Specify a preferred Docker registry mirror")
+	flag.StringVar(&config.VXLANPeer, []string{"-peer"}, "", "Use a vxlan peer to link containers")
 
 	// Localhost is by default considered as an insecure registry
 	// This is a stop-gap for people who are running a private registry on localhost (especially on Boot2docker).

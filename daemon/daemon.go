@@ -754,13 +754,6 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		return nil, err
 	}
 
-	networks, err := net.New("")
-	if err != nil {
-		return nil, err
-	}
-	networks.Set("default", net.NewNetwork())
-	networks.SetDefault("default")
-
 	log.Debugf("Creating repository list")
 	repositories, err := graph.NewTagStore(path.Join(config.Root, "repositories-"+driver.String()), g, config.Mirrors, config.InsecureRegistries)
 	if err != nil {
@@ -793,6 +786,8 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 			return nil, err
 		}
 		job := eng.Job("init_networkdriver")
+
+		job.Setenv("VXLANPeer", config.VXLANPeer)
 		job.Setenv("BridgeIface", bridge.Iface)
 		job.Setenv("BridgeNet", bridge.Net.String())
 		job.Setenv("DefaultBindingIP", config.DefaultIp.String())
@@ -838,7 +833,6 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 	daemon := &Daemon{
 		repository:     daemonRepo,
 		containers:     &contStore{s: make(map[string]*Container)},
-		networks:       networks,
 		execCommands:   newExecStore(),
 		graph:          g,
 		repositories:   repositories,
@@ -854,6 +848,22 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		trustStore:     t,
 		networkDriver:  netDriver,
 	}
+
+	getContainer := func(name string) (net.Container, error) {
+		c, err := daemon.GetByName(name)
+		if err != nil {
+			return nil, err
+		}
+		return &NetContainerShim{c}, nil
+	}
+	networks, err := net.New(getContainer, "")
+	if err != nil {
+		return nil, err
+	}
+	networks.Set("default", net.NewNetwork())
+	networks.SetDefault("default")
+	daemon.networks = networks
+
 	if err := daemon.restore(); err != nil {
 		return nil, err
 	}

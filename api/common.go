@@ -11,6 +11,12 @@ import (
 	"github.com/docker/docker/pkg/version"
 )
 
+type Cmd struct {
+	Name string
+	Args []string
+	Env  map[string]interface{}
+}
+
 const (
 	APIVERSION        version.Version = "1.16"
 	DEFAULTHTTPHOST                   = "127.0.0.1"
