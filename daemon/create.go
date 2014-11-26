@@ -103,11 +103,27 @@ func (daemon *Daemon) Create(config *runconfig.Config, hostConfig *runconfig.Hos
 			return nil, nil, err
 		}
 	}
+
+	// By default join a network under the specified name
+	network, endpoint, err := daemon.networking.CreateContainerEndpoint(string(hostConfig.NetworkMode), container.ID)
+	if err != nil {
+		daemon.networking.RemoveContainerEndpoint(string(hostConfig.NetworkMode), container.ID)
+		return nil, nil, err
+	}
+
+	container.Networks = []*ContainerNetwork{
+		&ContainerNetwork{
+			NetworkId:  network.Id(),
+			EndpointId: endpoint.Id,
+		},
+	}
+
 	if err := container.ToDisk(); err != nil {
 		return nil, nil, err
 	}
 	return container, warnings, nil
 }
+
 func (daemon *Daemon) GenerateSecurityOpt(ipcMode runconfig.IpcMode) ([]string, error) {
 	if ipcMode.IsHost() {
 		return label.DisableSecOpt(), nil

@@ -27,6 +27,7 @@ import (
 	"github.com/docker/docker/engine"
 	"github.com/docker/docker/graph"
 	"github.com/docker/docker/image"
+	"github.com/docker/docker/net"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/broadcastwriter"
 	"github.com/docker/docker/pkg/graphdb"
@@ -100,6 +101,7 @@ type Daemon struct {
 	driver         graphdriver.Driver
 	execDriver     execdriver.Driver
 	trustStore     *trust.TrustStore
+	networking     *net.Networking
 }
 
 // Install installs daemon capabilities to eng.
@@ -586,6 +588,7 @@ func (daemon *Daemon) newContainer(name string, config *runconfig.Config, img *i
 		execCommands:    newExecStore(),
 	}
 	container.root = daemon.containerRoot(container.ID)
+
 	return container, err
 }
 
@@ -830,6 +833,11 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		return nil, err
 	}
 
+	networking := net.NetworkingThingy
+	//if err != nil {
+	//return nil, err
+	//}
+
 	log.Debugf("Creating repository list")
 	repositories, err := graph.NewTagStore(path.Join(config.Root, "repositories-"+driver.String()), g, config.Mirrors, config.InsecureRegistries)
 	if err != nil {
@@ -916,6 +924,7 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		execDriver:     ed,
 		eng:            eng,
 		trustStore:     t,
+		networking:     networking,
 	}
 	if err := daemon.restore(); err != nil {
 		return nil, err

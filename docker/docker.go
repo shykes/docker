@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/client"
 	"github.com/docker/docker/dockerversion"
+	_ "github.com/docker/docker/net/something"
 	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/docker/docker/utils"

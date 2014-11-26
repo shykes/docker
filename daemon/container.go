@@ -20,6 +20,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/engine"
+	"github.com/docker/docker/extensions"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/links"
 	"github.com/docker/docker/nat"
@@ -94,6 +95,13 @@ type Container struct {
 	activeLinks  map[string]*links.Link
 	monitor      *containerMonitor
 	execCommands *execStore
+
+	Networks []*ContainerNetwork
+}
+
+type ContainerNetwork struct {
+	NetworkId  string
+	EndpointId string
 }
 
 func (container *Container) FromDisk() error {
@@ -936,6 +944,21 @@ func (container *Container) DisableLink(name string) {
 	}
 }
 
+func (container *Container) networks() ([]extensions.Network, error) {
+	result := []extensions.Network{}
+
+	for _, networkConfig := range container.Networks {
+		network, err := container.daemon.networking.GetNetwork(networkConfig.NetworkId)
+		if err != nil {
+			return nil, err
+		}
+
+		result = append(result, network)
+	}
+
+	return result, nil
+}
+
 func (container *Container) setupContainerDns() error {
 	if container.ResolvConfPath != "" {
 		return nil
@@ -955,35 +978,45 @@ func (container *Container) setupContainerDns() error {
 		return err
 	}
 
-	if config.NetworkMode != "host" {
-		// check configurations for any container/daemon dns settings
-		if len(config.Dns) > 0 || len(daemon.config.Dns) > 0 || len(config.DnsSearch) > 0 || len(daemon.config.DnsSearch) > 0 {
-			var (
-				dns       = resolvconf.GetNameservers(resolvConf)
-				dnsSearch = resolvconf.GetSearchDomains(resolvConf)
-			)
-			if len(config.Dns) > 0 {
-				dns = config.Dns
-			} else if len(daemon.config.Dns) > 0 {
-				dns = daemon.config.Dns
-			}
-			if len(config.DnsSearch) > 0 {
-				dnsSearch = config.DnsSearch
-			} else if len(daemon.config.DnsSearch) > 0 {
-				dnsSearch = daemon.config.DnsSearch
-			}
-			return resolvconf.Build(container.ResolvConfPath, dns, dnsSearch)
-		}
+	networks, err := container.networks()
+	if err != nil {
+		return err
+	}
 
-		// replace any localhost/127.* nameservers
-		resolvConf = utils.RemoveLocalDns(resolvConf)
-		// if the resulting resolvConf is empty, use DefaultDns
-		if !bytes.Contains(resolvConf, []byte("nameserver")) {
-			log.Infof("No non localhost DNS resolver found in resolv.conf and containers can't use it. Using default external servers : %v", DefaultDns)
-			// prefix the default dns options with nameserver
-			resolvConf = append(resolvConf, []byte("\nnameserver "+strings.Join(DefaultDns, "\nnameserver "))...)
+	for _, network := range networks {
+		if network.CustomDnsSupported() {
+			// check configurations for any container/daemon dns settings
+			if len(config.Dns) > 0 || len(daemon.config.Dns) > 0 || len(config.DnsSearch) > 0 || len(daemon.config.DnsSearch) > 0 {
+				var (
+					dns       = resolvconf.GetNameservers(resolvConf)
+					dnsSearch = resolvconf.GetSearchDomains(resolvConf)
+				)
+				if len(config.Dns) > 0 {
+					dns = config.Dns
+				} else if len(daemon.config.Dns) > 0 {
+					dns = daemon.config.Dns
+				}
+				if len(config.DnsSearch) > 0 {
+					dnsSearch = config.DnsSearch
+				} else if len(daemon.config.DnsSearch) > 0 {
+					dnsSearch = daemon.config.DnsSearch
+				}
+				return resolvconf.Build(container.ResolvConfPath, dns, dnsSearch)
+			}
+
+			// replace any localhost/127.* nameservers
+			resolvConf = utils.RemoveLocalDns(resolvConf)
+			// if the resulting resolvConf is empty, use DefaultDns
+			if !bytes.Contains(resolvConf, []byte("nameserver")) {
+				log.Infof("No non localhost DNS resolver found in resolv.conf and containers can't use it. Using default external servers : %v", DefaultDns)
+				// prefix the default dns options with nameserver
+				resolvConf = append(resolvConf, []byte("\nnameserver "+strings.Join(DefaultDns, "\nnameserver "))...)
+			}
+
+			break
 		}
 	}
+
 	return ioutil.WriteFile(container.ResolvConfPath, resolvConf, 0644)
 }
 
@@ -1008,49 +1041,55 @@ func (container *Container) updateParentsHosts() error {
 }
 
 func (container *Container) initializeNetworking() error {
-	var err error
-	if container.hostConfig.NetworkMode.IsHost() {
-		container.Config.Hostname, err = os.Hostname()
-		if err != nil {
-			return err
-		}
-
-		parts := strings.SplitN(container.Config.Hostname, ".", 2)
-		if len(parts) > 1 {
-			container.Config.Hostname = parts[0]
-			container.Config.Domainname = parts[1]
-		}
-
-		content, err := ioutil.ReadFile("/etc/hosts")
-		if os.IsNotExist(err) {
-			return container.buildHostnameAndHostsFiles("")
-		} else if err != nil {
-			return err
-		}
-
-		if err := container.buildHostnameFile(); err != nil {
-			return err
-		}
-
-		hostsPath, err := container.getRootResourcePath("hosts")
-		if err != nil {
-			return err
-		}
-		container.HostsPath = hostsPath
-
-		return ioutil.WriteFile(container.HostsPath, content, 0644)
+	networks, err := container.networks()
+	if err != nil {
+		return err
 	}
-	if container.hostConfig.NetworkMode.IsContainer() {
-		// we need to get the hosts files from the container to join
-		nc, err := container.getNetworkedContainer()
-		if err != nil {
-			return err
+
+	for _, network := range networks {
+		if network.NamespaceFactory().IsHost() {
+			container.Config.Hostname, err = os.Hostname()
+			if err != nil {
+				return err
+			}
+
+			parts := strings.SplitN(container.Config.Hostname, ".", 2)
+			if len(parts) > 1 {
+				container.Config.Hostname = parts[0]
+				container.Config.Domainname = parts[1]
+			}
+
+			content, err := ioutil.ReadFile("/etc/hosts")
+			if os.IsNotExist(err) {
+				return container.buildHostnameAndHostsFiles("")
+			} else if err != nil {
+				return err
+			}
+
+			if err := container.buildHostnameFile(); err != nil {
+				return err
+			}
+
+			hostsPath, err := container.getRootResourcePath("hosts")
+			if err != nil {
+				return err
+			}
+			container.HostsPath = hostsPath
+
+			return ioutil.WriteFile(container.HostsPath, content, 0644)
 		}
-		container.HostsPath = nc.HostsPath
-		container.ResolvConfPath = nc.ResolvConfPath
-		container.Config.Hostname = nc.Config.Hostname
-		container.Config.Domainname = nc.Config.Domainname
-		return nil
+		if network.NamespaceFactory().IsContainer() {
+			// we need to get the hosts files from the container to join
+			nc, err := container.getNetworkedContainer()
+			if err != nil {
+				return err
+			}
+			container.HostsPath = nc.HostsPath
+			container.ResolvConfPath = nc.ResolvConfPath
+			container.Config.Hostname = nc.Config.Hostname
+			container.Config.Domainname = nc.Config.Domainname
+			return nil
+		}
 	}
 	if container.daemon.config.DisableNetwork {
 		container.Config.NetworkDisabled = true
