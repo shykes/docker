@@ -55,7 +55,7 @@ clone git github.com/docker/libtrust 230dfd18c232
 
 clone git github.com/Sirupsen/logrus v0.6.0
 
-clone git github.com/docker/libpack 2eb51e1e6c
+clone git github.com/tiborvass/libpack f7a2ab87fa82
 
 clone git github.com/vishvananda/netlink 178d3a43f5
 

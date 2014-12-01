@@ -82,6 +82,44 @@ func OpenOrInit(repo, ref string) (*DB, error) {
 	return Init(repo, ref)
 }
 
+type OdbBackendMaker func(*git.Repository) (git.GoOdbBackend, error)
+type RefdbBackendMaker func(*git.Repository, *git.Refdb) (git.GoRefdbBackend, error)
+
+func OpenWithBackends(newOdbBackend OdbBackendMaker, newRefdbBackend RefdbBackendMaker) (*DB, error) {
+	odb, err := git.NewOdb()
+	if err != nil {
+		return nil, err
+	}
+	repo, err := git.NewRepositoryWrapOdb(odb)
+	if err != nil {
+		return nil, err
+	}
+
+	odbBackend, err := newOdbBackend(repo)
+	if err != nil {
+		return nil, err
+	}
+	odb.AddBackend(git.NewOdbBackendFromGo(odbBackend), 1)
+
+	refdb, err := repo.NewRefdb()
+	if err != nil {
+		return nil, err
+	}
+
+	// refdb should be able to return repo so that we don't need to specify repo as an argument.
+	refdbBackend, err := newRefdbBackend(repo, refdb)
+	if err != nil {
+		return nil, err
+	}
+	if err := refdb.SetBackend(git.NewRefdbBackendFromGo(refdbBackend)); err != nil {
+		return nil, err
+	}
+
+	repo.SetRefdb(refdb)
+
+	return &DB{repo: repo}, nil
+}
+
 func newRepo(repo *git.Repository, ref string) (*DB, error) {
 	db := &DB{
 		repo: repo,

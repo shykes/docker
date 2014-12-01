@@ -10,7 +10,34 @@ import (
 
 var expectingErr = errors.New("error expected")
 
-func TestState(t *testing.T) {
+func TestStateGoBackend(t *testing.T) {
+	s, err := NewDummyGitState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.List("/")
+	s.Set("foo", "bar")
+	s.Get("foo")
+	s.List("/")
+	s.Set("hello", "world")
+	s.List("/")
+	s.Set("sub/path/key", "value")
+	s.List("/")
+	s.List("/sub")
+	s.List("/sub/path/")
+	s.Mkdir("/dir")
+	// order does not matter, since it is sorted in list()
+	s.List("/")
+	s.Remove("/sub")
+	s.List("/")
+	s.List("/sub/path")
+	s.Get("/sub/path/key")
+
+	s.Close()
+}
+
+func TestStateSingleHost(t *testing.T) {
 	tmp, err := ioutil.TempDir("", "TestState")
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +100,7 @@ func (t expecter) list(root string, expect []string, errs ...error) {
 	if err != nil {
 		if len(errs) > 0 && errs[0] != nil {
 			// error is expected
-			t.Logf("expected error: %v", err)
+			t.Logf("All good, error was expected: %v", err)
 			return
 		}
 		t.Fatal(err)

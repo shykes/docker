@@ -97,8 +97,8 @@ RUN	curl -sSL -o /cirros.tar.gz https://github.com/ewindisch/docker-cirros/raw/1
 # Setup s3cmd config
 RUN	/bin/echo -e '[default]\naccess_key=$AWS_ACCESS_KEY\nsecret_key=$AWS_SECRET_KEY' > $HOME/.s3cfg
 
-# Get libgit2
-RUN go get -d github.com/libgit2/git2go && cd /go/src/github.com/libgit2/git2go && git submodule update --init && make install
+# Get libgit2 from tiborvass (to include some patches)
+RUN mkdir -p /go/src/github.com/libgit2 && git clone https://github.com/tiborvass/git2go.git /go/src/github.com/libgit2/git2go && cd /go/src/github.com/libgit2/git2go && git checkout origin/go_backends && git submodule update --init && make install
 
 # Set user.email so crosbymichael's in-container merge commits go smoothly
 RUN	git config --global user.email 'docker-dummy@example.com'

@@ -11,6 +11,10 @@ import (
 
 // Removes a key from the tree.
 func treeDel(repo *git.Repository, tree *git.Tree, key string) (*git.Tree, error) {
+	if tree == nil {
+		return nil, nil
+	}
+
 	var err error
 
 	key = TreePath(key)

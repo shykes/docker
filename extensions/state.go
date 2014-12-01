@@ -4,12 +4,25 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/docker/libpack"
+	"github.com/tiborvass/libpack"
+	"github.com/tiborvass/libpack/backends/dummy"
 )
+
+const _DEBUG = true
 
 // GitState uses docker/libpack and satisfies the State interface.
 type GitState struct {
 	db *libpack.DB
+}
+
+// This is backed by libpack/backends/dummy which is a shim and does nothing.
+// It is here to show the possibility of having a Go backend for libgit2.
+func NewDummyGitState() (*GitState, error) {
+	db, err := libpack.OpenWithBackends(libpack.OdbBackendMaker(dummy.NewOdbBackend), libpack.RefdbBackendMaker(dummy.NewRefdbBackend))
+	if err != nil {
+		return nil, err
+	}
+	return &GitState{db: db}, nil
 }
 
 // GitStateFromFolder returns a ready-to-use GitState.
@@ -48,30 +61,46 @@ func (s GitState) Get(key string) (value string, err error) {
 //		baz
 // List("/") -> ["foo", "bar"]
 func (s GitState) List(dir string) ([]string, error) {
-	return s.db.List(dir)
+	res, err := s.db.List(dir)
+	if _DEBUG {
+		fmt.Printf("List(%q) -> (%v, err:%v)\n", dir, res, err)
+	}
+	return res, err
 }
 
 // Set sets the key `key`, to a value `value`.
 // It automatically overrides the existing value if any.
 func (s GitState) Set(key, value string) error {
-	if err := s.db.Set(key, value); err != nil {
-		return err
+	err := s.db.Set(key, value)
+	if err == nil {
+		err = s.db.Commit(fmt.Sprintf("set %q=%q", key, value))
 	}
-	return s.db.Commit(fmt.Sprintf("set %q=%q", key, value))
+	if _DEBUG {
+		fmt.Printf("Set(%q, %q) -> err:%v\n", key, value, err)
+	}
+	return err
 }
 
 // Remove deletes the value associated with `key`.
 func (s GitState) Remove(key string) error {
-	if err := s.db.Delete(key); err != nil {
-		return err
+	err := s.db.Delete(key)
+	if err == nil {
+		err = s.db.Commit(fmt.Sprintf("del %q", key))
 	}
-	return s.db.Commit(fmt.Sprintf("del %q", key))
+	if _DEBUG {
+		fmt.Printf("Remove(%q) -> err:%v\n", key, err)
+	}
+	return err
 }
 
 // Mkdir creates the directory `dir`.
 func (s GitState) Mkdir(dir string) error {
-	if err := s.db.Mkdir(dir); err != nil {
-		return err
+	err := s.db.Mkdir(dir)
+	if err == nil {
+		err = s.db.Commit(fmt.Sprintf("mkdir %q", dir))
 	}
-	return s.db.Commit(fmt.Sprintf("mkdir %q", dir))
+	if _DEBUG {
+		fmt.Printf("Mkdir(%q) -> err:%v\n", dir, err)
+	}
+	return err
 }
