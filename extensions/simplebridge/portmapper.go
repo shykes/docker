@@ -39,8 +39,6 @@ var (
 	portTableFormat = "/proc/net/%s"      // XXX this is overwritten in tests to use test data.
 )
 
-const defaultChain = "DOCKER"
-
 type forwardFunc func(string, iptables.Action, string, net.IP, uint, net.IP, uint) error
 
 func getIPTablesChain(chainName string) *iptables.Chain {
@@ -107,15 +105,22 @@ func loadPortTable(proto string, mapped map[uint][]net.IP) error {
 	return nil
 }
 
-func MakeChain(chainName string) error {
+func MakeChain(chainName string, networkName string) error {
 	chainMutex.Lock()
 	defer chainMutex.Unlock()
 
-	if _, ok := chainMap[chainName]; ok {
-		return fmt.Errorf("Chain for %q already exists", chainName)
+	// Recreate the chain if it already exists
+	chain, err := iptables.NewChain(chainName, networkName)
+	if err != nil {
+		chainMap[chainName] = &iptables.Chain{chainName, networkName}
+		chainMap[chainName].Remove()
+		chainMap[chainName], err = iptables.NewChain(chainName, networkName)
+		if err != nil {
+			return err
+		}
+	} else {
+		chainMap[chainName] = chain
 	}
-
-	chainMap[chainName] = &iptables.Chain{}
 
 	return nil
 }
@@ -161,10 +166,6 @@ func (pm *PortMap) Map() error {
 
 	if err := loadPortTable(pm.proto+"6", mapped); err != nil {
 		return err
-	}
-
-	if pm.chainName == "" {
-		pm.chainName = defaultChain
 	}
 
 	ips, ok := mapped[pm.hostPort]
