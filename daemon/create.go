@@ -86,13 +86,16 @@ func (daemon *Daemon) attachContainerToDefaultNetwork(cid, name string) (network
 		if name, err = daemon.generateNewName(cid); err != nil {
 			return nil, err
 		}
+
+		// FIXME:networking Ugly hack: remove the leading '/', cap length.
+		name = name[1:6]
 	}
 
 	// Link the sandbox to the network, thus creating a new endpoint with the
 	// provided name.
 	// FIXME:networking Do we need Link() to return the Endpoint?
 	// FIXME:networking Deal with link name length
-	ep, err := defaultNet.Link(sandbox, name[1:6], false /* replace */)
+	ep, err := defaultNet.Link(sandbox, name, false /* replace */)
 	if err != nil {
 		return nil, err
 	}

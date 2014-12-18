@@ -57,20 +57,32 @@ func (d *Daemon) CmdNetJoin(job *engine.Job) engine.Status {
 		return job.Errorf("usage: %s NETWORK CONTAINER NAME", job.Name)
 	}
 
-	net, err := d.networks.GetNetwork(job.Args[0])
+	networkID := job.Args[0]
+	net, err := d.networks.GetNetwork(networkID)
 	if err != nil {
 		return job.Error(err)
 	}
 
 	// FIXME The provided CONTAINER could be the 'user facing ID'. but not
-	// necessarily the sandbox ID itself: we're keeping things simple herengine.
-	sandbox, err := d.sandboxes.Get(job.Args[1])
+	// necessarily the sandbox ID itself: we're keeping things simple here.
+	containerID := job.Args[1]
+	if fullid, err := d.idIndex.Get(containerID); err == nil {
+		containerID = fullid
+	}
+
+	sandbox, err := d.sandboxes.Get(containerID)
 	if err != nil {
 		return job.Error(err)
 	}
 
-	if _, err := net.Link(sandbox, job.Args[2], false); err != nil {
+	ep, err := net.Link(sandbox, job.Args[2], false)
+	if err != nil {
 		return job.Error(err)
+	}
+
+	// FIXME Provides output for `docker ps`
+	if c := d.containers.Get(containerID); c != nil {
+		c.Endpoints[networkID] = append(c.Endpoints[networkID], ep.Name())
 	}
 	return engine.StatusOK
 }
