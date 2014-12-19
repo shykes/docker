@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	maxVethName   = 8
-	maxVethSuffix = 32
+	maxVethName      = 10
+	maxVethSuffixLen = 2
+	maxVethSuffix    = 99
 )
 
 type BridgeDriver struct {
@@ -80,7 +81,7 @@ func (d *BridgeDriver) loadEndpoint(name, endpoint string) (*BridgeEndpoint, err
 }
 
 func (d *BridgeDriver) saveEndpoint(name string, ep *BridgeEndpoint) error {
-	if err := d.setEndpointProperty(name, ep.ID, "interfaceName", ep.ID); err != nil {
+	if err := d.setEndpointProperty(name, ep.ID, "interfaceName", ep.interfaceName); err != nil {
 		return err
 	}
 
@@ -128,7 +129,7 @@ func (d *BridgeDriver) Link(id, name string, s sandbox.Sandbox, replace bool) (n
 	}
 
 	if err := ep.configure(name, s); err != nil {
-		fmt.Println("[fail] ep.configure")
+		fmt.Printf("[fail] ep.configure: %v", err)
 		return nil, err
 	}
 
@@ -194,7 +195,7 @@ func (d *BridgeDriver) loadNetwork(id string) (*BridgeNetwork, error) {
 		ID:          id,
 		driver:      d,
 		network:     ipNet,
-		ipallocator: NewIPAllocator(id, ipNet, nil, nil),
+		ipallocator: NewIPAllocator(iface, ipNet, nil, nil),
 	}, nil
 }
 
@@ -253,7 +254,7 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 
 	for i := 0; i < maxVethSuffix; i++ {
 		ethName = fmt.Sprintf("%s%d", prefix, i)
-		if len(ethName) > maxVethName {
+		if len(ethName) > maxVethName+maxVethSuffixLen {
 			return nil, fmt.Errorf("EthName %q is longer than %d bytes", prefix, maxVethName)
 		}
 		if _, err := netlink.LinkByName(ethName); err != nil {
@@ -277,12 +278,12 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, device string) (*BridgeNetwork, error) {
 	dockerbridge := &netlink.Bridge{netlink.LinkAttrs{Name: id}}
 
-	iface, err := d.getInterface(id, dockerbridge)
+	linkval, err := d.getInterface(id, dockerbridge)
 	if err != nil {
 		log.Println("Error get interface", err)
 		return nil, err
 	}
-	dockerbridge = iface.(*netlink.Bridge)
+	dockerbridge = linkval.(*netlink.Bridge)
 
 	addr, err := GetBridgeIP()
 	if err != nil {
@@ -319,7 +320,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 
 	var vxlan *netlink.Vxlan
 
-	if peer != "" && device != "" {
+	if peer != "" && device != "" && id != "default" { // FIXME DEMO default should not be treated this way
 		iface, err := net.InterfaceByName(device)
 		if err != nil {
 			log.Println("Error get interface", err)
@@ -335,12 +336,12 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 			Port:         int(port),
 		}
 
-		iface, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan)
+		linkval, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan)
 		if err != nil {
 			log.Println("Error get interface", err)
 			return nil, err
 		}
-		vxlan = iface.(*netlink.Vxlan)
+		vxlan = linkval.(*netlink.Vxlan)
 
 		// ignore errors in case it was already set
 		if err := netlink.LinkSetMaster(vxlan, dockerbridge); err != nil {
@@ -353,7 +354,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 		}
 	}
 
-	if err := MakeChain(id, id); err != nil {
+	if err := MakeChain(id, dockerbridge.LinkAttrs.Name); err != nil {
 		return nil, err
 	}
 
@@ -363,7 +364,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 		ID:          id,
 		driver:      d,
 		network:     addr,
-		ipallocator: NewIPAllocator(id, addr, nil, nil),
+		ipallocator: NewIPAllocator(dockerbridge.LinkAttrs.Name, addr, nil, nil),
 	}, nil
 }
 

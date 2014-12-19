@@ -71,7 +71,7 @@ func (b *BridgeEndpoint) configure(name string, s sandbox.Sandbox) error {
 	}
 
 	// in the strange case the bridge no longer exists, bail.
-	if _, err := netlink.LinkByName(b.network.Name()); err != nil {
+	if _, err := netlink.LinkByName(b.network.bridge.LinkAttrs.Name); err != nil {
 		return fmt.Errorf("Link %q does not exist", b.network.Name())
 	}
 
@@ -94,7 +94,7 @@ func (b *BridgeEndpoint) configure(name string, s sandbox.Sandbox) error {
 
 	ip, err := b.network.ipallocator.Allocate()
 	if err != nil {
-		fmt.Printf("ipallocator")
+		fmt.Printf("ipallocator: %v", err)
 		return err
 	}
 
@@ -118,6 +118,7 @@ func (b *BridgeEndpoint) configure(name string, s sandbox.Sandbox) error {
 	}
 
 	b.ip = ip
+	b.interfaceName = name
 
 	return s.AddIface(ns)
 }
