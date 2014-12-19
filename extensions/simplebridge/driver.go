@@ -277,12 +277,12 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, device string) (*BridgeNetwork, error) {
 	dockerbridge := &netlink.Bridge{netlink.LinkAttrs{Name: id}}
 
-	iface, err := d.getInterface(id, dockerbridge)
+	linkval, err := d.getInterface(id, dockerbridge)
 	if err != nil {
 		log.Println("Error get interface", err)
 		return nil, err
 	}
-	dockerbridge = iface.(*netlink.Bridge)
+	dockerbridge = linkval.(*netlink.Bridge)
 
 	addr, err := GetBridgeIP()
 	if err != nil {
@@ -335,12 +335,12 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 			Port:         int(port),
 		}
 
-		iface, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan)
+		linkval, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan)
 		if err != nil {
 			log.Println("Error get interface", err)
 			return nil, err
 		}
-		vxlan = iface.(*netlink.Vxlan)
+		vxlan = linkval.(*netlink.Vxlan)
 
 		// ignore errors in case it was already set
 		if err := netlink.LinkSetMaster(vxlan, dockerbridge); err != nil {
