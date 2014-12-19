@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/docker/docker/sandbox"
@@ -77,7 +78,11 @@ func (c *Controller) ListNetworks() []string {
 func (c *Controller) GetNetwork(id string) (Network, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	return c.networks[id], nil
+	netw, ok := c.networks[id]
+	if !ok {
+		return nil, fmt.Errorf("unknown network %q", id)
+	}
+	return netw, nil
 }
 
 func (c *Controller) RemoveNetwork(id string) error {

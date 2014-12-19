@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/pkg/graphdb"
-
 	"github.com/docker/docker/engine"
 	"github.com/docker/docker/pkg/parsers/filters"
 )
@@ -44,12 +42,6 @@ func (daemon *Daemon) Containers(job *engine.Job) engine.Status {
 			filt_exited = append(filt_exited, code)
 		}
 	}
-
-	names := map[string][]string{}
-	daemon.ContainerGraph().Walk("/", func(p string, e *graphdb.Entity) error {
-		names[e.ID()] = append(names[e.ID()], p)
-		return nil
-	}, -1)
 
 	var beforeCont, sinceCont *Container
 	if before != "" {
@@ -88,15 +80,17 @@ func (daemon *Daemon) Containers(job *engine.Job) engine.Status {
 		// that as a match.
 		// So instead of "all containers with name <NAME>", the filter now means
 		//               "all containers linked to any network endpoint named <NAME>"
-		var nameMatch bool
+		var names []string
+		nameMatch := true
 		for _, endpoints := range container.Endpoints {
 			for _, epid := range endpoints {
 				ep, err := daemon.networks.GetEndpoint(epid)
 				if err != nil {
 					return err
 				}
-				if psFilters.Match("name", ep.Name()) {
-					nameMatch = true
+				names = append(names, fmt.Sprintf("%s/%s", ep.Network().Id(), ep.Name()))
+				if !psFilters.Match("name", ep.Name()) {
+					nameMatch = false
 					break
 				}
 			}
@@ -133,7 +127,7 @@ func (daemon *Daemon) Containers(job *engine.Job) engine.Status {
 		displayed++
 		out := &engine.Env{}
 		out.Set("Id", container.ID)
-		out.SetList("Names", names[container.ID])
+		out.SetList("Names", names)
 		out.Set("Image", daemon.Repositories().ImageName(container.Image))
 		if len(container.Args) > 0 {
 			args := []string{}
