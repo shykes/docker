@@ -81,7 +81,7 @@ func (d *BridgeDriver) loadEndpoint(name, endpoint string) (*BridgeEndpoint, err
 }
 
 func (d *BridgeDriver) saveEndpoint(name string, ep *BridgeEndpoint) error {
-	if err := d.setEndpointProperty(name, ep.ID, "interfaceName", ep.ID); err != nil {
+	if err := d.setEndpointProperty(name, ep.ID, "interfaceName", ep.interfaceName); err != nil {
 		return err
 	}
 
@@ -129,7 +129,7 @@ func (d *BridgeDriver) Link(id, name string, s sandbox.Sandbox, replace bool) (n
 	}
 
 	if err := ep.configure(name, s); err != nil {
-		fmt.Println("[fail] ep.configure")
+		fmt.Printf("[fail] ep.configure: %v", err)
 		return nil, err
 	}
 
@@ -195,7 +195,7 @@ func (d *BridgeDriver) loadNetwork(id string) (*BridgeNetwork, error) {
 		ID:          id,
 		driver:      d,
 		network:     ipNet,
-		ipallocator: NewIPAllocator(id, ipNet, nil, nil),
+		ipallocator: NewIPAllocator(iface, ipNet, nil, nil),
 	}, nil
 }
 
@@ -354,7 +354,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 		}
 	}
 
-	if err := MakeChain(id, id); err != nil {
+	if err := MakeChain(id, dockerbridge.LinkAttrs.Name); err != nil {
 		return nil, err
 	}
 
@@ -364,7 +364,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 		ID:          id,
 		driver:      d,
 		network:     addr,
-		ipallocator: NewIPAllocator(id, addr, nil, nil),
+		ipallocator: NewIPAllocator(dockerbridge.LinkAttrs.Name, addr, nil, nil),
 	}, nil
 }
 
