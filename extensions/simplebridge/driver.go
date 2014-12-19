@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 
@@ -191,7 +192,7 @@ func (d *BridgeDriver) AddNetwork(id string, args []string) error {
 	fs := flag.NewFlagSet("simplebridge", flag.ContinueOnError)
 	// FIXME need to figure out a way to prop usage
 	fs.Usage = func() {}
-	peer := fs.String("peer", "", "VXLan peer to contact")
+	peer := fs.String("peer", os.Getenv("DOCKER_PEER"), "VXLan peer to contact")
 	vlanid := fs.Uint("vid", 42, "VXLan VLAN ID")
 	port := fs.Uint("port", 4789, "VXLan Tunneling Port")
 	device := fs.String("dev", "eth0", "Device to set as the vxlan endpoint")
