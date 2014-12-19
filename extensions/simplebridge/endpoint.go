@@ -1,8 +1,11 @@
 package simplebridge
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/network"
@@ -20,6 +23,7 @@ type BridgeEndpoint struct {
 	interfaceName string
 	hwAddr        string
 	mtu           uint
+	ip            net.IP
 
 	network *BridgeNetwork
 }
@@ -33,7 +37,25 @@ func (b *BridgeEndpoint) Network() network.Network {
 }
 
 func (b *BridgeEndpoint) Expose(portspec string, publish bool) error {
-	return nil
+	// FIXME this interface sucks
+	MakeChain(b.network.ID, b.network.bridge.LinkAttrs.Name)
+
+	mapped := strings.SplitN(portspec, "/", 2)
+
+	if len(mapped) == 0 {
+		return errors.New("Missing port specification")
+	}
+
+	if len(mapped) < 2 {
+		mapped[1] = "tcp"
+	}
+
+	port, err := strconv.ParseInt(mapped[0], 10, 64)
+	if err != nil {
+		return err
+	}
+
+	return NewPortMap(b.network.ID, net.ParseIP("0.0.0.0"), mapped[1], b.ip, uint(port), uint(port), nil).Map()
 }
 
 func (b *BridgeEndpoint) configure(name string, s sandbox.Sandbox) error {
@@ -94,6 +116,8 @@ func (b *BridgeEndpoint) configure(name string, s sandbox.Sandbox) error {
 		Gateway: b.network.network.IP.String(),
 		Mtu:     mtu,
 	}
+
+	b.ip = ip
 
 	return s.AddIface(ns)
 }

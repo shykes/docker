@@ -55,6 +55,13 @@ func (d *BridgeDriver) loadEndpoint(name, endpoint string) (*BridgeEndpoint, err
 		return nil, err
 	}
 
+	ipaddr, err := d.getEndpointProperty(name, endpoint, "ip")
+	if err != nil {
+		return nil, err
+	}
+
+	ip := net.ParseIP(ipaddr)
+
 	mtuInt, _ := strconv.ParseUint(mtu, 10, 32)
 
 	network, err := d.loadNetwork(name)
@@ -68,6 +75,7 @@ func (d *BridgeDriver) loadEndpoint(name, endpoint string) (*BridgeEndpoint, err
 		hwAddr:        hwAddr,
 		mtu:           uint(mtuInt),
 		network:       network,
+		ip:            ip,
 	}, nil
 }
 
@@ -81,6 +89,10 @@ func (d *BridgeDriver) saveEndpoint(name string, ep *BridgeEndpoint) error {
 	}
 
 	if err := d.setEndpointProperty(name, ep.ID, "mtu", strconv.Itoa(int(ep.mtu))); err != nil {
+		return err
+	}
+
+	if err := d.setEndpointProperty(name, ep.ID, "ip", ep.ip.String()); err != nil {
 		return err
 	}
 
@@ -339,6 +351,10 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 			log.Println("Error linksetmaster", err)
 			return nil, err
 		}
+	}
+
+	if err := MakeChain(id, id); err != nil {
+		return nil, err
 	}
 
 	return &BridgeNetwork{
