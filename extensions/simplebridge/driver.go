@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	maxVethName   = 8
-	maxVethSuffix = 32
+	maxVethName      = 10
+	maxVethSuffixLen = 2
+	maxVethSuffix    = 99
 )
 
 type BridgeDriver struct {
@@ -253,7 +254,7 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 
 	for i := 0; i < maxVethSuffix; i++ {
 		ethName = fmt.Sprintf("%s%d", prefix, i)
-		if len(ethName) > maxVethName {
+		if len(ethName) > maxVethName+maxVethSuffixLen {
 			return nil, fmt.Errorf("EthName %q is longer than %d bytes", prefix, maxVethName)
 		}
 		if _, err := netlink.LinkByName(ethName); err != nil {
@@ -319,7 +320,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 
 	var vxlan *netlink.Vxlan
 
-	if peer != "" && device != "" {
+	if peer != "" && device != "" && id != "default" { // FIXME DEMO default should not be treated this way
 		iface, err := net.InterfaceByName(device)
 		if err != nil {
 			log.Println("Error get interface", err)
