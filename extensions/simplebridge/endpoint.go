@@ -120,7 +120,11 @@ func (b *BridgeEndpoint) configure(name string, s sandbox.Sandbox) error {
 	b.ip = ip
 	b.interfaceName = name
 
-	return s.AddIface(ns)
+	if s != nil { // this allows for pure endpoint testing.
+		return s.AddIface(ns)
+	} else {
+		return nil
+	}
 }
 
 func (b *BridgeEndpoint) deconfigure(name string) error {
