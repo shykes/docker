@@ -313,7 +313,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 		return nil, err
 	}
 
-	if err := setupIPTables(id, addr, true, true); err != nil {
+	if err := setupIPTables(id, addr); err != nil {
 		return nil, err
 	}
 
@@ -379,23 +379,20 @@ func (d *BridgeDriver) destroyBridge(b *netlink.Bridge, v *netlink.Vxlan) error 
 }
 
 // FIXME remove last two parameters
-func setupIPTables(bridgeIface string, addr net.Addr, icc, ipmasq bool) error {
-
+func setupIPTables(bridgeIface string, addr net.Addr) error {
 	if err := ioutil.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0600); err != nil {
 		return err
 	}
 
 	// Enable NAT
 
-	if ipmasq {
-		natArgs := []string{"POSTROUTING", "-t", "nat", "-s", addr.String(), "!", "-o", bridgeIface, "-j", "MASQUERADE"}
+	natArgs := []string{"POSTROUTING", "-t", "nat", "-s", addr.String(), "!", "-o", bridgeIface, "-j", "MASQUERADE"}
 
-		if !iptables.Exists(natArgs...) {
-			if output, err := iptables.Raw(append([]string{"-I"}, natArgs...)...); err != nil {
-				return fmt.Errorf("Unable to enable network bridge NAT: %s", err)
-			} else if len(output) != 0 {
-				return &iptables.ChainError{Chain: "POSTROUTING", Output: output}
-			}
+	if !iptables.Exists(natArgs...) {
+		if output, err := iptables.Raw(append([]string{"-I"}, natArgs...)...); err != nil {
+			return fmt.Errorf("Unable to enable network bridge NAT: %s", err)
+		} else if len(output) != 0 {
+			return &iptables.ChainError{Chain: "POSTROUTING", Output: output}
 		}
 	}
 
@@ -405,27 +402,13 @@ func setupIPTables(bridgeIface string, addr net.Addr, icc, ipmasq bool) error {
 		dropArgs   = append(args, "DROP")
 	)
 
-	if !icc {
-		iptables.Raw(append([]string{"-D"}, acceptArgs...)...)
+	iptables.Raw(append([]string{"-D"}, dropArgs...)...)
 
-		if !iptables.Exists(dropArgs...) {
-			log.Debugf("Disable inter-container communication")
-			if output, err := iptables.Raw(append([]string{"-I"}, dropArgs...)...); err != nil {
-				return fmt.Errorf("Unable to prevent intercontainer communication: %s", err)
-			} else if len(output) != 0 {
-				return fmt.Errorf("Error disabling intercontainer communication: %s", output)
-			}
-		}
-	} else {
-		iptables.Raw(append([]string{"-D"}, dropArgs...)...)
-
-		if !iptables.Exists(acceptArgs...) {
-			log.Debugf("Enable inter-container communication")
-			if output, err := iptables.Raw(append([]string{"-I"}, acceptArgs...)...); err != nil {
-				return fmt.Errorf("Unable to allow intercontainer communication: %s", err)
-			} else if len(output) != 0 {
-				return fmt.Errorf("Error enabling intercontainer communication: %s", output)
-			}
+	if !iptables.Exists(acceptArgs...) {
+		if output, err := iptables.Raw(append([]string{"-I"}, acceptArgs...)...); err != nil {
+			return fmt.Errorf("Unable to allow intercontainer communication: %s", err)
+		} else if len(output) != 0 {
+			return fmt.Errorf("Error enabling intercontainer communication: %s", output)
 		}
 	}
 
@@ -449,5 +432,6 @@ func setupIPTables(bridgeIface string, addr net.Addr, icc, ipmasq bool) error {
 			return &iptables.ChainError{Chain: "FORWARD incoming", Output: output}
 		}
 	}
+
 	return nil
 }
