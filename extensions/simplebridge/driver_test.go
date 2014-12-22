@@ -4,10 +4,17 @@ import (
 	"io/ioutil"
 	"testing"
 
+	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/state"
 
 	"github.com/vishvananda/netlink"
 )
+
+type DummySandbox struct{}
+
+func (d DummySandbox) AddIface(ns *execdriver.NetworkSettings) error {
+	return nil
+}
 
 /*
 NOTE:
@@ -86,7 +93,7 @@ func TestEndpoint(t *testing.T) {
 		netlink.LinkDel(link)
 	}
 
-	if _, err := driver.Link("test", "ept", nil, true); err != nil {
+	if _, err := driver.Link("test", "ept", DummySandbox{}, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -98,7 +105,7 @@ func TestEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := driver.Unlink("test", "ept", nil); err != nil {
+	if err := driver.Unlink("test", "ept", DummySandbox{}); err != nil {
 		t.Fatal(err)
 	}
 
