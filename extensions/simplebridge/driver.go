@@ -159,7 +159,7 @@ func (d *BridgeDriver) Unlink(netid, name string, sb sandbox.Sandbox) error {
 func (d *BridgeDriver) saveNetwork(network string, bridge *BridgeNetwork) error {
 	networkSchema := d.schema.Network(network)
 	// FIXME allocator, address will be broken if not saved
-	if err := networkSchema.Set("bridgeInterface", bridge.bridge.Name); err != nil {
+	if err := networkSchema.Set("bridge_interface", bridge.bridge.Name); err != nil {
 		return err
 	}
 
@@ -173,7 +173,7 @@ func (d *BridgeDriver) saveNetwork(network string, bridge *BridgeNetwork) error 
 func (d *BridgeDriver) loadNetwork(network string) (*BridgeNetwork, error) {
 	networkSchema := d.schema.Network(network)
 
-	iface, err := networkSchema.Get("bridgeInterface")
+	iface, err := networkSchema.Get("bridge_interface")
 	if err != nil {
 		return nil, err
 	}
