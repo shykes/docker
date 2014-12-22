@@ -46,6 +46,8 @@ func createNetwork(t *testing.T) *BridgeDriver {
 		t.Fatal(err)
 	}
 
+	driver.schema = NewSchema(driver.state)
+
 	if err := driver.AddNetwork("test", []string{}); err != nil {
 		t.Fatal(err)
 	}
