@@ -2,11 +2,6 @@ package simplebridge
 
 import "path"
 
-const (
-	NetworkPrefix  = "networks"
-	EndpointPrefix = "endpoints"
-)
-
 func (d *BridgeDriver) joinNetwork(network string) string {
 	return path.Join(NetworkPrefix, network)
 }

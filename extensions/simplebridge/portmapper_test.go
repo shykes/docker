@@ -40,22 +40,11 @@ func resetMap() {
 	testForwardMap = map[string]testPortMap{}
 }
 
-func TestMakeChain(t *testing.T) {
-	if err := MakeChain("test"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := MakeChain("test"); err == nil {
-		t.Fatal("test chain was already created but does not error")
-	}
-
-	if err := MakeChain("test2"); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestMap(t *testing.T) {
 	resetMap()
+
+	defaultChain := "DOCKER"
+	MakeChain(defaultChain, "test")
 
 	// the testdata has 111, 22, and 44210 open on 0/0 tcp and tcp6
 	if err := NewPortMap(defaultChain, net.ParseIP("0.0.0.0"), "tcp", net.ParseIP("123.123.123.123"), 0, 1234, testForward).Map(); err != nil {
@@ -96,6 +85,9 @@ func TestMap(t *testing.T) {
 func TestUnmap(t *testing.T) {
 	resetMap()
 
+	defaultChain := "DOCKER"
+	MakeChain(defaultChain, "test")
+
 	if err := NewPortMap(defaultChain, net.ParseIP("0.0.0.0"), "tcp", net.ParseIP("123.123.123.123"), 0, 1234, testForward).Unmap(); err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +112,9 @@ func TestUnmap(t *testing.T) {
 
 func TestMapIPv6(t *testing.T) {
 	resetMap()
+
+	defaultChain := "DOCKER"
+	MakeChain(defaultChain, "test")
 
 	// the testdata has 111, 22, and 44210 open on 0/0 tcp and tcp6
 	if err := NewPortMap(defaultChain, net.ParseIP("::"), "tcp", net.ParseIP("fe80::1"), 0, 1234, testForward).Map(); err != nil {
@@ -159,6 +154,9 @@ func TestMapIPv6(t *testing.T) {
 
 func TestUnmapIPv6(t *testing.T) {
 	resetMap()
+
+	defaultChain := "DOCKER"
+	MakeChain(defaultChain, "test")
 
 	if err := NewPortMap(defaultChain, net.ParseIP("::"), "tcp", net.ParseIP("fe80::1"), 0, 1234, testForward).Unmap(); err != nil {
 		t.Fatal(err)
