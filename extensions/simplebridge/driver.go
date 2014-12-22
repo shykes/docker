@@ -249,38 +249,6 @@ func (d *BridgeDriver) RemoveNetwork(network string) error {
 	return bridge.destroy()
 }
 
-func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (netlink.Link, error) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-
-	var (
-		ethName   string
-		available bool
-	)
-
-	for i := 0; i < maxVethSuffix; i++ {
-		ethName = fmt.Sprintf("%s%d", prefix, i)
-		if len(ethName) > maxVethName+maxVethSuffixLen {
-			return nil, fmt.Errorf("EthName %q is longer than %d bytes", prefix, maxVethName)
-		}
-		if _, err := netlink.LinkByName(ethName); err != nil {
-			available = true
-			break
-		}
-	}
-
-	if !available {
-		return nil, fmt.Errorf("Cannot allocate more than %d ethernet devices for prefix %q", maxVethSuffix, prefix)
-	}
-
-	linkParams.Attrs().Name = ethName
-	if err := netlink.LinkAdd(linkParams); err != nil {
-		return nil, err
-	}
-
-	return linkParams, nil
-}
-
 func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, device string) (*BridgeNetwork, error) {
 	dockerbridge := &netlink.Bridge{netlink.LinkAttrs{Name: id}}
 

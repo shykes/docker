@@ -6,7 +6,41 @@ import (
 	"net"
 
 	"github.com/docker/docker/pkg/iptables"
+
+	"github.com/vishvananda/netlink"
 )
+
+func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (netlink.Link, error) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	var (
+		ethName   string
+		available bool
+	)
+
+	for i := 0; i < maxVethSuffix; i++ {
+		ethName = fmt.Sprintf("%s%d", prefix, i)
+		if len(ethName) > maxVethName+maxVethSuffixLen {
+			return nil, fmt.Errorf("EthName %q is longer than %d bytes", prefix, maxVethName)
+		}
+		if _, err := netlink.LinkByName(ethName); err != nil {
+			available = true
+			break
+		}
+	}
+
+	if !available {
+		return nil, fmt.Errorf("Cannot allocate more than %d ethernet devices for prefix %q", maxVethSuffix, prefix)
+	}
+
+	linkParams.Attrs().Name = ethName
+	if err := netlink.LinkAdd(linkParams); err != nil {
+		return nil, err
+	}
+
+	return linkParams, nil
+}
 
 func setupIPTables(bridgeIface string, addr net.Addr) error {
 	if err := ioutil.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0600); err != nil {
