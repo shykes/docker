@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
-	"os"
 	"strconv"
 	"sync"
 
@@ -204,7 +203,7 @@ func (d *BridgeDriver) AddNetwork(network string, args []string) error {
 	fs := flag.NewFlagSet("simplebridge", flag.ContinueOnError)
 	// FIXME need to figure out a way to prop usage
 	fs.Usage = func() {}
-	peer := fs.String("peer", os.Getenv("DOCKER_PEER"), "VXLan peer to contact")
+	peer := fs.String("peer", "", "VXLan peer to contact")
 	vlanid := fs.Uint("vid", 42, "VXLan VLAN ID")
 	port := fs.Uint("port", 4789, "VXLan Tunneling Port")
 	device := fs.String("dev", "eth0", "Device to set as the vxlan endpoint")
@@ -319,7 +318,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 
 	var vxlan *netlink.Vxlan
 
-	if peer != "" && device != "" && id != "default" { // FIXME DEMO default should not be treated this way
+	if peer != "" && device != "" {
 		iface, err := net.InterfaceByName(device)
 		if err != nil {
 			log.Println("Error get interface", err)
