@@ -167,6 +167,10 @@ func (d *BridgeDriver) saveNetwork(network string, bridge *BridgeNetwork) error 
 		return err
 	}
 
+	if bridge.vxlan != nil {
+		networkSchema.Set("vxlan_device", bridge.vxlan.Attrs().Name)
+	}
+
 	return nil
 }
 
@@ -186,9 +190,15 @@ func (d *BridgeDriver) loadNetwork(network string) (*BridgeNetwork, error) {
 	ip, ipNet, err := net.ParseCIDR(addr)
 	ipNet.IP = ip
 
+	var vxlan *netlink.Vxlan
+
+	vxdev, err := networkSchema.Get("vxlan_device")
+	if err == nil && vxdev != "" {
+		vxlan = &netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: vxdev}}
+	}
+
 	return &BridgeNetwork{
-		// DEMO FIXME
-		//vxlan:       &netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: "vx" + iface}},
+		vxlan:       vxlan,
 		bridge:      &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: iface}},
 		ID:          network,
 		driver:      d,
