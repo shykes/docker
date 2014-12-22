@@ -1,14 +1,121 @@
 package simplebridge
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 
 	"github.com/docker/docker/pkg/iptables"
 
 	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netlink/nl"
 )
+
+func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, device string) (*BridgeNetwork, error) {
+	dockerbridge := &netlink.Bridge{netlink.LinkAttrs{Name: id}}
+
+	linkval, err := d.getInterface(id, dockerbridge)
+	if err != nil {
+		log.Println("Error get interface", err)
+		return nil, err
+	}
+	dockerbridge = linkval.(*netlink.Bridge)
+
+	addr, err := GetBridgeIP()
+	if err != nil {
+		return nil, err
+	}
+
+	addrList, err := netlink.AddrList(dockerbridge, nl.GetIPFamily(addr.IP))
+	if err != nil {
+		return nil, err
+	}
+
+	var found bool
+	for _, el := range addrList {
+		if bytes.Equal(el.IPNet.IP, addr.IP) && bytes.Equal(el.IPNet.Mask, addr.Mask) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		if err := netlink.AddrAdd(dockerbridge, &netlink.Addr{IPNet: addr}); err != nil {
+			log.Println("Error add addr", err)
+			return nil, err
+		}
+	}
+
+	if err := netlink.LinkSetUp(dockerbridge); err != nil {
+		log.Println("Error up bridge", err)
+		return nil, err
+	}
+
+	if err := setupIPTables(id, addr); err != nil {
+		return nil, err
+	}
+
+	var vxlan *netlink.Vxlan
+
+	if peer != "" && device != "" {
+		iface, err := net.InterfaceByName(device)
+		if err != nil {
+			log.Println("Error get interface", err)
+			return nil, err
+		}
+
+		vxlan = &netlink.Vxlan{
+			// DEMO FIXME: name collisions, better error recovery
+			LinkAttrs:    netlink.LinkAttrs{Name: "vx" + id, Flags: net.FlagMulticast},
+			VtepDevIndex: iface.Index,
+			VxlanId:      int(vlanid),
+			Group:        net.ParseIP(peer),
+			Port:         int(port),
+		}
+
+		linkval, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan)
+		if err != nil {
+			log.Println("Error get interface", err)
+			return nil, err
+		}
+		vxlan = linkval.(*netlink.Vxlan)
+
+		// ignore errors in case it was already set
+		if err := netlink.LinkSetMaster(vxlan, dockerbridge); err != nil {
+			log.Println("Error linksetmaster", err)
+			return nil, err
+		}
+		if err := netlink.LinkSetUp(vxlan); err != nil {
+			log.Println("Error linksetmaster", err)
+			return nil, err
+		}
+	}
+
+	if err := MakeChain(id, dockerbridge.LinkAttrs.Name); err != nil {
+		return nil, err
+	}
+
+	return &BridgeNetwork{
+		vxlan:       vxlan,
+		bridge:      dockerbridge,
+		ID:          id,
+		driver:      d,
+		network:     addr,
+		ipallocator: NewIPAllocator(dockerbridge.LinkAttrs.Name, addr, nil, nil),
+	}, nil
+}
+
+func (d *BridgeDriver) destroyBridge(b *netlink.Bridge, v *netlink.Vxlan) error {
+	// DEMO FIXME
+	if v != nil {
+		if err := netlink.LinkDel(v); err != nil {
+			return err
+		}
+	}
+
+	return netlink.LinkDel(b)
+}
 
 func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (netlink.Link, error) {
 	d.mutex.Lock()
