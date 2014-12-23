@@ -7,7 +7,7 @@ const driverName = "bridge"
 type Extension struct{}
 
 func (e Extension) Install(c context.Context) error {
-	return c.RegisterNetworkDriver(&BridgeDriver{state: c.MyState()}, driverName)
+	return c.RegisterNetworkDriver(&BridgeDriver{state: c.MyState(), schema: NewSchema(c.MyState())}, driverName)
 }
 
 func (e Extension) Uninstall(c context.Context) error {

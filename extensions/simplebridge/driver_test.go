@@ -4,13 +4,36 @@ import (
 	"io/ioutil"
 	"testing"
 
+	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/state"
 
 	"github.com/vishvananda/netlink"
 )
 
+type DummySandbox struct{}
+
+func (d DummySandbox) AddIface(ns *execdriver.NetworkSettings) error {
+	return nil
+}
+
+/*
+NOTE:
+
+The interface allocator tries to get a FREE interface aggressively. This is
+uncontrollable at this point. What this means, however, if the `test` network
+is created and `test0` already exists, `test1` will be created by the driver.
+The problem with this is mostly predictability within the tests.
+
+So, we kinda sorta try to keep this stable by ensuring any `test0` device is
+removed before the next set of tests run. See `createNetwork` and the
+post-remove assertions.
+
+The way forward is an "overwrite" or "fail on error" flag which controls this
+behavior.
+*/
+
 func createNetwork(t *testing.T) *BridgeDriver {
-	if link, err := netlink.LinkByName("test"); err == nil {
+	if link, err := netlink.LinkByName("test0"); err == nil {
 		netlink.LinkDel(link)
 	}
 
@@ -30,6 +53,8 @@ func createNetwork(t *testing.T) *BridgeDriver {
 		t.Fatal(err)
 	}
 
+	driver.schema = NewSchema(driver.state)
+
 	if err := driver.AddNetwork("test", []string{}); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +65,7 @@ func createNetwork(t *testing.T) *BridgeDriver {
 func TestNetwork(t *testing.T) {
 	driver := createNetwork(t)
 
-	if _, err := netlink.LinkByName("test"); err != nil {
+	if _, err := netlink.LinkByName("test0"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,7 +73,7 @@ func TestNetwork(t *testing.T) {
 		t.Fatal("Fetching network 'test' did not succeed")
 	}
 
-	if link, _ := netlink.LinkByName("test"); link == nil {
+	if link, _ := netlink.LinkByName("test0"); link == nil {
 		t.Fatalf("Could not find %q link", "test")
 	}
 
@@ -56,7 +81,7 @@ func TestNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if link, _ := netlink.LinkByName("test"); link != nil {
+	if link, _ := netlink.LinkByName("test0"); link != nil {
 		t.Fatalf("link %q still exists after RemoveNetwork", "test")
 	}
 }
@@ -68,7 +93,7 @@ func TestEndpoint(t *testing.T) {
 		netlink.LinkDel(link)
 	}
 
-	if _, err := driver.Link("test", "ept", nil, true); err != nil {
+	if _, err := driver.Link("test", "ept", DummySandbox{}, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +105,7 @@ func TestEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := driver.Unlink("test", "ept", nil); err != nil {
+	if err := driver.Unlink("test", "ept", DummySandbox{}); err != nil {
 		t.Fatal(err)
 	}
 

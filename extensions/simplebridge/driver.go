@@ -27,12 +27,13 @@ const (
 )
 
 type BridgeDriver struct {
-	state state.State
-	mutex sync.Mutex
+	schema *Schema
+	state  state.State
+	mutex  sync.Mutex
 }
 
-func (d *BridgeDriver) GetNetwork(id string) (network.Network, error) {
-	return d.loadNetwork(id)
+func (d *BridgeDriver) GetNetwork(network string) (network.Network, error) {
+	return d.loadNetwork(network)
 }
 
 func (d *BridgeDriver) Restore(s state.State) error {
@@ -40,23 +41,25 @@ func (d *BridgeDriver) Restore(s state.State) error {
 	return nil
 }
 
-func (d *BridgeDriver) loadEndpoint(name, endpoint string) (*BridgeEndpoint, error) {
-	iface, err := d.getEndpointProperty(name, endpoint, "interfaceName")
+func (d *BridgeDriver) loadEndpoint(network, endpoint string) (*BridgeEndpoint, error) {
+	scope := d.schema.Endpoint(network, endpoint)
+
+	iface, err := scope.Get("interface_name")
 	if err != nil {
 		return nil, err
 	}
 
-	hwAddr, err := d.getEndpointProperty(name, endpoint, "hwAddr")
+	hwAddr, err := scope.Get("hwaddr")
 	if err != nil {
 		return nil, err
 	}
 
-	mtu, err := d.getEndpointProperty(name, endpoint, "mtu")
+	mtu, err := scope.Get("mtu")
 	if err != nil {
 		return nil, err
 	}
 
-	ipaddr, err := d.getEndpointProperty(name, endpoint, "ip")
+	ipaddr, err := scope.Get("ip")
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +68,7 @@ func (d *BridgeDriver) loadEndpoint(name, endpoint string) (*BridgeEndpoint, err
 
 	mtuInt, _ := strconv.ParseUint(mtu, 10, 32)
 
-	network, err := d.loadNetwork(name)
+	netObj, err := d.loadNetwork(network)
 	if err != nil {
 		return nil, err
 	}
@@ -75,65 +78,58 @@ func (d *BridgeDriver) loadEndpoint(name, endpoint string) (*BridgeEndpoint, err
 		interfaceName: iface,
 		hwAddr:        hwAddr,
 		mtu:           uint(mtuInt),
-		network:       network,
+		network:       netObj,
 		ip:            ip,
 	}, nil
 }
 
-func (d *BridgeDriver) saveEndpoint(name string, ep *BridgeEndpoint) error {
-	if err := d.setEndpointProperty(name, ep.ID, "interfaceName", ep.interfaceName); err != nil {
-		return err
+func (d *BridgeDriver) saveEndpoint(network string, ep *BridgeEndpoint) error {
+	scope := d.schema.Endpoint(network, ep.ID)
+
+	pathMap := map[string]string{
+		"interface_name": ep.interfaceName,
+		"hwaddr":         ep.hwAddr,
+		"mtu":            strconv.Itoa(int(ep.mtu)),
+		"ip":             ep.ip.String(),
 	}
 
-	if err := d.setEndpointProperty(name, ep.ID, "hwAddr", ep.hwAddr); err != nil {
-		return err
-	}
-
-	if err := d.setEndpointProperty(name, ep.ID, "mtu", strconv.Itoa(int(ep.mtu))); err != nil {
-		return err
-	}
-
-	if err := d.setEndpointProperty(name, ep.ID, "ip", ep.ip.String()); err != nil {
-		return err
-	}
-
-	return nil
+	return scope.MultiSet(pathMap)
 }
 
 // discovery driver? should it be hooked here or in the core?
-func (d *BridgeDriver) Link(id, name string, s sandbox.Sandbox, replace bool) (network.Endpoint, error) {
-	if len(name) > maxVethName {
-		return nil, fmt.Errorf("name %q is too long, must be %d characters", name, maxVethName)
+func (d *BridgeDriver) Link(network, endpoint string, s sandbox.Sandbox, replace bool) (network.Endpoint, error) {
+	if len(endpoint) > maxVethName {
+		return nil, fmt.Errorf("endpoint %q is too long, must be %d characters", endpoint, maxVethName)
 	}
 
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
-	network, err := d.loadNetwork(id)
+	netObj, err := d.loadNetwork(network)
 	if err != nil {
 		return nil, err
 	}
 
 	ep := &BridgeEndpoint{
-		network: network,
-		ID:      name,
+		network: netObj,
+		ID:      endpoint,
 	}
 
-	if ep, err := d.loadEndpoint(id, name); ep != nil && err != nil && !replace {
-		return nil, fmt.Errorf("Endpoint %q already taken", name)
+	if ep, err := d.loadEndpoint(network, endpoint); ep != nil && err != nil && !replace {
+		return nil, fmt.Errorf("Endpoint %q already taken", endpoint)
 	}
 
-	if err := d.createEndpoint(id, name); err != nil {
+	if err := d.schema.Endpoint(network, endpoint).Create(""); err != nil {
 		fmt.Println("[fail] d.createEndpoint")
 		return nil, err
 	}
 
-	if err := ep.configure(name, s); err != nil {
+	if err := ep.configure(endpoint, s); err != nil {
 		fmt.Printf("[fail] ep.configure: %v", err)
 		return nil, err
 	}
 
-	if err := d.saveEndpoint(id, ep); err != nil {
+	if err := d.saveEndpoint(network, ep); err != nil {
 		fmt.Println("[fail] d.saveEndpoint")
 		return nil, err
 	}
@@ -154,33 +150,36 @@ func (d *BridgeDriver) Unlink(netid, name string, sb sandbox.Sandbox) error {
 		return err
 	}
 
-	if err := d.removeEndpoint(netid, name); err != nil {
+	if err := d.schema.Endpoint(netid, name).Remove(""); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (d *BridgeDriver) saveNetwork(id string, bridge *BridgeNetwork) error {
+func (d *BridgeDriver) saveNetwork(network string, bridge *BridgeNetwork) error {
+	networkSchema := d.schema.Network(network)
 	// FIXME allocator, address will be broken if not saved
-	if err := d.setNetworkProperty(id, "bridgeInterface", bridge.bridge.Name); err != nil {
+	if err := networkSchema.Set("bridgeInterface", bridge.bridge.Name); err != nil {
 		return err
 	}
 
-	if err := d.setNetworkProperty(id, "address", bridge.network.String()); err != nil {
+	if err := networkSchema.Set("address", bridge.network.String()); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (d *BridgeDriver) loadNetwork(id string) (*BridgeNetwork, error) {
-	iface, err := d.getNetworkProperty(id, "bridgeInterface")
+func (d *BridgeDriver) loadNetwork(network string) (*BridgeNetwork, error) {
+	networkSchema := d.schema.Network(network)
+
+	iface, err := networkSchema.Get("bridgeInterface")
 	if err != nil {
 		return nil, err
 	}
 
-	addr, err := d.getNetworkProperty(id, "address")
+	addr, err := networkSchema.Get("address")
 	if err != nil {
 		return nil, err
 	}
@@ -192,14 +191,14 @@ func (d *BridgeDriver) loadNetwork(id string) (*BridgeNetwork, error) {
 		// DEMO FIXME
 		//vxlan:       &netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: "vx" + iface}},
 		bridge:      &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: iface}},
-		ID:          id,
+		ID:          network,
 		driver:      d,
 		network:     ipNet,
 		ipallocator: NewIPAllocator(iface, ipNet, nil, nil),
 	}, nil
 }
 
-func (d *BridgeDriver) AddNetwork(id string, args []string) error {
+func (d *BridgeDriver) AddNetwork(network string, args []string) error {
 	// FIXME this should be abstracted from the network driver
 
 	fs := flag.NewFlagSet("simplebridge", flag.ContinueOnError)
@@ -214,29 +213,29 @@ func (d *BridgeDriver) AddNetwork(id string, args []string) error {
 		return err
 	}
 
-	if err := d.createNetwork(id); err != nil {
+	if err := d.schema.Network(network).Create(""); err != nil {
 		return err
 	}
 
-	bridge, err := d.createBridge(id, *vlanid, *port, *peer, *device)
+	bridge, err := d.createBridge(network, *vlanid, *port, *peer, *device)
 	if err != nil {
 		return err
 	}
 
-	if err := d.saveNetwork(id, bridge); err != nil {
+	if err := d.saveNetwork(network, bridge); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (d *BridgeDriver) RemoveNetwork(id string) error {
-	bridge, err := d.loadNetwork(id)
+func (d *BridgeDriver) RemoveNetwork(network string) error {
+	bridge, err := d.loadNetwork(network)
 	if err != nil {
 		return err
 	}
 
-	if err := d.removeNetwork(id); err != nil {
+	if err := d.schema.Network(network).Remove(""); err != nil {
 		return err
 	}
 
