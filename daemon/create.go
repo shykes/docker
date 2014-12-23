@@ -126,12 +126,15 @@ func (daemon *Daemon) Create(config *runconfig.Config, hostConfig *runconfig.Hos
 			return nil, nil, err
 		}
 	}
+	if hostConfig == nil {
+		hostConfig = &runconfig.HostConfig{}
+	}
 	c := &Container{
 		// FIXME: we should generate the ID here instead of receiving it as an argument
 		ID:              utils.GenerateRandomID(),
 		Created:         time.Now().UTC(),
 		Config:          config,
-		hostConfig:      &runconfig.HostConfig{},
+		hostConfig:      hostConfig,
 		Image:           img.ID, // Always use the resolved image id
 		NetworkSettings: &NetworkSettings{},
 		Driver:          daemon.driver.String(),
