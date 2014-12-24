@@ -106,11 +106,15 @@ func (d *BridgeDriver) destroyBridge(b *netlink.Bridge, v *netlink.Vxlan) error 
 	// DEMO FIXME
 	if v != nil {
 		if err := netlink.LinkDel(v); err != nil {
-			return err
+			return fmt.Errorf("vxlan link delete: %v", err)
 		}
 	}
 
-	return netlink.LinkDel(b)
+	if err := netlink.LinkDel(b); err != nil {
+		return fmt.Errorf("bridge link del: %v", err)
+	}
+
+	return nil
 }
 
 func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (netlink.Link, error) {
@@ -127,6 +131,7 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 		if len(ethName) > maxVethName+maxVethSuffixLen {
 			return nil, fmt.Errorf("getInterface: EthName %q is longer than %d bytes", prefix, maxVethName)
 		}
+		// FIXME create the interface here so it's atomic
 		if _, err := netlink.LinkByName(ethName); err != nil {
 			available = true
 			break
@@ -139,7 +144,7 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 
 	linkParams.Attrs().Name = ethName
 	if err := netlink.LinkAdd(linkParams); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getInterface: create interface %q: %v", ethName, err)
 	}
 
 	return linkParams, nil
@@ -147,7 +152,7 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 
 func setupIPTables(bridgeIface string, addr net.Addr) error {
 	if err := ioutil.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0600); err != nil {
-		return err
+		return fmt.Errorf("Setting net.ipv4.ip_forward: %v", err)
 	}
 
 	// Enable NAT
