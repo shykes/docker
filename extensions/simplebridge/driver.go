@@ -55,17 +55,14 @@ func (d *BridgeDriver) Link(network, endpoint string, s sandbox.Sandbox, replace
 	}
 
 	if err := d.schema.Endpoint(network, endpoint).Create(""); err != nil {
-		fmt.Println("[fail] d.createEndpoint")
-		return nil, err
+		return nil, fmt.Errorf("Trouble creating endpoint %q for network %q: %v", endpoint, network, err)
 	}
 
 	if err := ep.configure(endpoint, s); err != nil {
-		fmt.Printf("[fail] ep.configure: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("Trouble configuring endpoint %q for network %q: %v", endpoint, network, err)
 	}
 
 	if err := d.saveEndpoint(network, ep); err != nil {
-		fmt.Println("[fail] d.saveEndpoint")
 		return nil, err
 	}
 
@@ -82,11 +79,11 @@ func (d *BridgeDriver) Unlink(netid, name string, sb sandbox.Sandbox) error {
 	}
 
 	if err := ep.deconfigure(name); err != nil {
-		return err
+		return fmt.Errorf("Trouble deconfiguring endpoint %q for network %q: %v", name, netid, err)
 	}
 
 	if err := d.schema.Endpoint(netid, name).Remove(""); err != nil {
-		return err
+		return fmt.Errorf("Trouble removing endpoint %q for network %q: %v", name, netid, err)
 	}
 
 	return nil
@@ -104,11 +101,11 @@ func (d *BridgeDriver) AddNetwork(network string, args []string) error {
 	device := fs.String("dev", "eth0", "Device to set as the vxlan endpoint")
 
 	if err := fs.Parse(args); err != nil {
-		return err
+		return fmt.Errorf("Trouble parsing argument for AddNetwork on network %q: %v", network, err)
 	}
 
 	if err := d.schema.Network(network).Create(""); err != nil {
-		return err
+		return fmt.Errorf("Trouble creating network %q: %v", network, err)
 	}
 
 	bridge, err := d.createBridge(network, *vlanid, *port, *peer, *device)
@@ -130,7 +127,7 @@ func (d *BridgeDriver) RemoveNetwork(network string) error {
 	}
 
 	if err := d.schema.Network(network).Remove(""); err != nil {
-		return err
+		return fmt.Errorf("Trouble removing network %q: %v", network, err)
 	}
 
 	return bridge.destroy()
