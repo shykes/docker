@@ -56,14 +56,14 @@ func forward(chainName string, action iptables.Action, proto string, sourceIP ne
 func loadPortTable(proto string, mapped map[uint][]net.IP) error {
 	f, err := os.Open(fmt.Sprintf(portTableFormat, path.Base(proto)))
 	if err != nil {
-		return err
+		return fmt.Errorf("Error scanning local port mappings: %v", err)
 	}
 
 	defer f.Close()
 
 	content, err := ioutil.ReadAll(f)
 	if err != nil {
-		return err
+		return fmt.Errorf("Error scanning local port mappings: %v", err)
 	}
 
 	strContent := string(content)
@@ -79,12 +79,12 @@ func loadPortTable(proto string, mapped map[uint][]net.IP) error {
 
 		ip, err := hex.DecodeString(parts[0])
 		if err != nil {
-			return err
+			return fmt.Errorf("Error scanning local port mappings: %v", err)
 		}
 
 		port, err := hex.DecodeString(parts[1])
 		if err != nil {
-			return err
+			return fmt.Errorf("Error scanning local port mappings: %v", err)
 		}
 
 		realIP := net.IP(ip)
@@ -116,7 +116,7 @@ func MakeChain(chainName string, networkName string) error {
 		chainMap[chainName].Remove()
 		chainMap[chainName], err = iptables.NewChain(chainName, networkName)
 		if err != nil {
-			return err
+			return fmt.Errorf("MakeChain: %v", err)
 		}
 	} else {
 		chainMap[chainName] = chain
@@ -146,7 +146,7 @@ func (pm *PortMap) Unmap() error {
 	defer mapperMutex.Unlock()
 
 	if err := pm.forward(pm.chainName, iptables.Delete, pm.proto, pm.hostIP, pm.hostPort, pm.containerIP, pm.containerPort); err != nil {
-		return err
+		return fmt.Errorf("Error unmapping %s port from %s:%s -> %s:%s: %v", pm.proto, pm.hostIP, pm.hostPort, pm.containerIP, pm.containerPort, err)
 	}
 
 	delete(hostPortMap, pm.hostPort)
@@ -197,7 +197,7 @@ func (pm *PortMap) Map() error {
 		}
 	} else {
 		if err := pm.forward(pm.chainName, iptables.Add, pm.proto, pm.hostIP, pm.hostPort, pm.containerIP, pm.containerPort); err != nil {
-			return err
+			return fmt.Errorf("Error mapping %s port from %s:%s -> %s:%s: %v", pm.proto, pm.hostIP, pm.hostPort, pm.containerIP, pm.containerPort, err)
 		}
 	}
 
