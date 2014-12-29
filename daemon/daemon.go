@@ -21,8 +21,6 @@ import (
 	"github.com/docker/docker/daemon/execdriver/lxc"
 	"github.com/docker/docker/daemon/graphdriver"
 	_ "github.com/docker/docker/daemon/graphdriver/vfs"
-	_ "github.com/docker/docker/daemon/networkdriver/bridge"
-	"github.com/docker/docker/daemon/networkdriver/portallocator"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/engine"
 	"github.com/docker/docker/extensions"
@@ -327,7 +325,7 @@ func (daemon *Daemon) restore() error {
 
 		// Create a default network for the default driver.
 		// FIXME should take parameters from docker -d
-		if net, err := daemon.networks.NewNetwork("default", []string{}); err != nil {
+		if net, err := daemon.networks.NewNetwork("default", []string{"--force"}); err != nil {
 			return fmt.Errorf("failed to create default network using default driver: %v", err)
 		} else {
 			daemon.networks.DefaultNetworkID = net.Id()
@@ -666,7 +664,7 @@ func NewDaemon(config *Config, eng *engine.Engine) (*Daemon, error) {
 
 func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error) {
 	if config.Mtu == 0 {
-		config.Mtu = getDefaultNetworkMtu()
+		config.Mtu = 1500
 	}
 	// Check for mutually incompatible config options
 	if config.BridgeIface != "" && config.BridgeIP != "" {
@@ -886,9 +884,6 @@ func NewDaemonFromDirectory(config *Config, eng *engine.Engine) (*Daemon, error)
 		// them as separate handlers to speed up total shutdown time
 		if err := daemon.shutdown(); err != nil {
 			log.Errorf("daemon.shutdown(): %s", err)
-		}
-		if err := portallocator.ReleaseAll(); err != nil {
-			log.Errorf("portallocator.ReleaseAll(): %s", err)
 		}
 		if err := daemon.driver.Cleanup(); err != nil {
 			log.Errorf("daemon.driver.Cleanup(): %s", err.Error())
