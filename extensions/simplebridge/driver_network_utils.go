@@ -16,10 +16,10 @@ func bridgeError(typ string, err error) error {
 	return fmt.Errorf("createBridge: %s: %v", typ, err)
 }
 
-func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, device string) (*BridgeNetwork, error) {
+func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, device string, force bool) (*BridgeNetwork, error) {
 	dockerbridge := &netlink.Bridge{netlink.LinkAttrs{Name: id}}
 
-	linkval, err := d.getInterface(id, dockerbridge, true)
+	linkval, err := d.getInterface(id, dockerbridge, force)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 			Port:         int(port),
 		}
 
-		linkval, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan, true)
+		linkval, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan, force)
 		if err != nil {
 			return nil, bridgeError("retrieve interface name", err)
 		}
@@ -117,6 +117,13 @@ func (d *BridgeDriver) destroyBridge(b *netlink.Bridge, v *netlink.Vxlan) error 
 	return nil
 }
 
+func (d *BridgeDriver) createInterface(linkParams netlink.Link) (netlink.Link, error) {
+	if err := netlink.LinkAdd(linkParams); err != nil {
+		return nil, err
+	}
+	return linkParams, nil
+}
+
 func (d *BridgeDriver) assertInterface(interfaceName string) bool {
 	_, err := netlink.LinkByName(interfaceName)
 	return err == nil
@@ -149,13 +156,15 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link, crea
 		}
 
 		linkParams.Attrs().Name = ethName
-		if err := netlink.LinkAdd(linkParams); err != nil {
-			return nil, fmt.Errorf("getInterface: create interface %q: %v", ethName, err)
-		}
+		return d.createInterface(linkParams)
 	} else if !d.assertInterface(linkParams.Attrs().Name) {
-		return nil, fmt.Errorf("Interface %q does not exist and you did not specify the create flag", linkParams.Attrs().Name)
+		// if create is not specified, and the interface doesn't exist, try to
+		// create it with the current link paramters.
+		return d.createInterface(linkParams)
 	}
 
+	// if create is not specified, and the interface exists, this will return
+	// exactly what was given to us.
 	return linkParams, nil
 }
 
