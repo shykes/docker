@@ -339,6 +339,9 @@ func (d *driver) Clean(id string) error {
 func (d *driver) AddIface(id string, iface *execdriver.NetworkSettings) error {
 	nsPath := d.nsPath(id)
 	netNsPath := filepath.Join(nsPath, "net")
+	if err := LoopbackUp(netNsPath); err != nil {
+		return err
+	}
 	return SetupChild(netNsPath, iface)
 }
 
