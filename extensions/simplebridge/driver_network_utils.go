@@ -19,7 +19,7 @@ func bridgeError(typ string, err error) error {
 func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, device string) (*BridgeNetwork, error) {
 	dockerbridge := &netlink.Bridge{netlink.LinkAttrs{Name: id}}
 
-	linkval, err := d.getInterface(id, dockerbridge)
+	linkval, err := d.getInterface(id, dockerbridge, true)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (d *BridgeDriver) createBridge(id string, vlanid uint, port uint, peer, dev
 			Port:         int(port),
 		}
 
-		linkval, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan)
+		linkval, err = d.getInterface(vxlan.LinkAttrs.Name, vxlan, true)
 		if err != nil {
 			return nil, bridgeError("retrieve interface name", err)
 		}
@@ -118,11 +118,11 @@ func (d *BridgeDriver) destroyBridge(b *netlink.Bridge, v *netlink.Vxlan) error 
 }
 
 func (d *BridgeDriver) assertInterface(interfaceName string) bool {
-	link, err := netlink.LinkByName(interfaceName)
-	return err == nil && link != nil
+	_, err := netlink.LinkByName(interfaceName)
+	return err == nil
 }
 
-func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (netlink.Link, error) {
+func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link, create bool) (netlink.Link, error) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
@@ -131,25 +131,29 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 		available bool
 	)
 
-	for i := 0; i < maxVethSuffix; i++ {
-		ethName = fmt.Sprintf("%s%d", prefix, i)
-		if len(ethName) > maxVethName+maxVethSuffixLen {
-			return nil, fmt.Errorf("getInterface: EthName %q is longer than %d bytes", prefix, maxVethName)
+	if create {
+		for i := 0; i < maxVethSuffix; i++ {
+			ethName = fmt.Sprintf("%s%d", prefix, i)
+			if len(ethName) > maxVethName+maxVethSuffixLen {
+				return nil, fmt.Errorf("getInterface: EthName %q is longer than %d bytes", prefix, maxVethName)
+			}
+			// FIXME create the interface here so it's atomic
+			if !d.assertInterface(ethName) {
+				available = true
+				break
+			}
 		}
-		// FIXME create the interface here so it's atomic
-		if !d.assertInterface(ethName) {
-			available = true
-			break
+
+		if !available {
+			return nil, fmt.Errorf("getInterface: Cannot allocate more than %d ethernet devices for prefix %q", maxVethSuffix, prefix)
 		}
-	}
 
-	if !available {
-		return nil, fmt.Errorf("getInterface: Cannot allocate more than %d ethernet devices for prefix %q", maxVethSuffix, prefix)
-	}
-
-	linkParams.Attrs().Name = ethName
-	if err := netlink.LinkAdd(linkParams); err != nil {
-		return nil, fmt.Errorf("getInterface: create interface %q: %v", ethName, err)
+		linkParams.Attrs().Name = ethName
+		if err := netlink.LinkAdd(linkParams); err != nil {
+			return nil, fmt.Errorf("getInterface: create interface %q: %v", ethName, err)
+		}
+	} else if !d.assertInterface(linkParams.Attrs().Name) {
+		return nil, fmt.Errorf("Interface %q does not exist and you did not specify the create flag", linkParams.Attrs().Name)
 	}
 
 	return linkParams, nil
