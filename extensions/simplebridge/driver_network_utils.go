@@ -117,6 +117,11 @@ func (d *BridgeDriver) destroyBridge(b *netlink.Bridge, v *netlink.Vxlan) error 
 	return nil
 }
 
+func (d *BridgeDriver) assertInterface(interfaceName string) bool {
+	link, err := netlink.LinkByName(interfaceName)
+	return err == nil && link != nil
+}
+
 func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (netlink.Link, error) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -132,7 +137,7 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link) (net
 			return nil, fmt.Errorf("getInterface: EthName %q is longer than %d bytes", prefix, maxVethName)
 		}
 		// FIXME create the interface here so it's atomic
-		if _, err := netlink.LinkByName(ethName); err != nil {
+		if !d.assertInterface(ethName) {
 			available = true
 			break
 		}
