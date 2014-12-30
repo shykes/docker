@@ -62,12 +62,12 @@ func (ip *IPAllocator) refresh(_if *net.Interface) (map[string]struct{}, error) 
 	if ip.v6 {
 		list, err = netlink.NeighList(_if.Index, netlink.FAMILY_V6)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Cannot retrieve IPv6 neighbor information for interface %q: %v", _if.Name, err)
 		}
 	} else {
 		list, err = netlink.NeighList(_if.Index, netlink.FAMILY_V4)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Cannot retrieve IPv4 neighbor information for interface %q: %v", _if.Name, err)
 		}
 	}
 
@@ -92,7 +92,7 @@ func (ip *IPAllocator) Allocate() (net.IP, error) {
 
 	_if, err := net.InterfaceByName(ip.bridgeName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ipallocator fetch bridge %q: %v", ip.bridgeName, err)
 	}
 
 	ipMap, err := ip.refreshFunc(_if)
@@ -119,7 +119,7 @@ func (ip *IPAllocator) Allocate() (net.IP, error) {
 
 		_, ok = ipMap[newip.String()]
 		if !ok {
-			// use ARP to check if the IP is in use, final sanity check.
+			// use ICMP to check if the IP is in use, final sanity check.
 			if ip.allocateFunc(newip) {
 				ipMap[newip.String()] = struct{}{}
 				ip.lastIP = newip

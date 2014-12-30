@@ -1,6 +1,7 @@
 package simplebridge
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 
@@ -12,22 +13,22 @@ func (d *BridgeDriver) loadEndpoint(network, endpoint string) (*BridgeEndpoint, 
 
 	iface, err := scope.Get("interface_name")
 	if err != nil {
-		return nil, err
+		return nil, loadEndpointError(endpoint, network, err)
 	}
 
 	hwAddr, err := scope.Get("hwaddr")
 	if err != nil {
-		return nil, err
+		return nil, loadEndpointError(endpoint, network, err)
 	}
 
 	mtu, err := scope.Get("mtu")
 	if err != nil {
-		return nil, err
+		return nil, loadEndpointError(endpoint, network, err)
 	}
 
 	ipaddr, err := scope.Get("ip")
 	if err != nil {
-		return nil, err
+		return nil, loadEndpointError(endpoint, network, err)
 	}
 
 	ip := net.ParseIP(ipaddr)
@@ -36,7 +37,7 @@ func (d *BridgeDriver) loadEndpoint(network, endpoint string) (*BridgeEndpoint, 
 
 	netObj, err := d.loadNetwork(network)
 	if err != nil {
-		return nil, err
+		return nil, loadEndpointError(endpoint, network, err)
 	}
 
 	return &BridgeEndpoint{
@@ -59,18 +60,22 @@ func (d *BridgeDriver) saveEndpoint(network string, ep *BridgeEndpoint) error {
 		"ip":             ep.ip.String(),
 	}
 
-	return scope.MultiSet(pathMap)
+	if err := scope.MultiSet(pathMap); err != nil {
+		return saveEndpointError(ep.ID, network, err)
+	}
+
+	return nil
 }
 
 func (d *BridgeDriver) saveNetwork(network string, bridge *BridgeNetwork) error {
 	networkSchema := d.schema.Network(network)
 	// FIXME allocator, address will be broken if not saved
 	if err := networkSchema.Set("bridge_interface", bridge.bridge.Name); err != nil {
-		return err
+		return loadNetworkError(network, err)
 	}
 
 	if err := networkSchema.Set("address", bridge.network.String()); err != nil {
-		return err
+		return loadNetworkError(network, err)
 	}
 
 	if bridge.vxlan != nil {
@@ -85,12 +90,12 @@ func (d *BridgeDriver) loadNetwork(network string) (*BridgeNetwork, error) {
 
 	iface, err := networkSchema.Get("bridge_interface")
 	if err != nil {
-		return nil, err
+		return nil, loadNetworkError(network, err)
 	}
 
 	addr, err := networkSchema.Get("address")
 	if err != nil {
-		return nil, err
+		return nil, loadNetworkError(network, err)
 	}
 
 	ip, ipNet, err := net.ParseCIDR(addr)
@@ -111,4 +116,28 @@ func (d *BridgeDriver) loadNetwork(network string) (*BridgeNetwork, error) {
 		network:     ipNet,
 		ipallocator: NewIPAllocator(iface, ipNet, nil, nil),
 	}, nil
+}
+
+func endpointError(function, ep, n string, err error) error {
+	return fmt.Errorf("Error %sing Endpoint %q for Network %q: %v", function, ep, n, err)
+}
+
+func networkError(function, n string, err error) error {
+	return fmt.Errorf("Error %sing Network %q: %v", function, n, err)
+}
+
+func loadEndpointError(ep, n string, err error) error {
+	return endpointError("load", ep, n, err)
+}
+
+func saveEndpointError(ep, n string, err error) error {
+	return endpointError("save", ep, n, err)
+}
+
+func loadNetworkError(n string, err error) error {
+	return networkError("load", n, err)
+}
+
+func saveNetworkError(n string, err error) error {
+	return networkError("save", n, err)
 }

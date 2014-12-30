@@ -1,7 +1,6 @@
 package simplebridge
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -43,7 +42,7 @@ func (b *BridgeEndpoint) Expose(portspec string, publish bool) error {
 	mapped := strings.SplitN(portspec, "/", 2)
 
 	if len(mapped) == 0 {
-		return errors.New("Missing port specification")
+		return fmt.Errorf("Missing/invalid port specification %q", portspec)
 	}
 
 	if len(mapped) < 2 {
@@ -52,7 +51,7 @@ func (b *BridgeEndpoint) Expose(portspec string, publish bool) error {
 
 	port, err := strconv.ParseInt(mapped[0], 10, 64)
 	if err != nil {
-		return err
+		return fmt.Errorf("Cannot convert port number %q to integer: %v", mapped[0], err)
 	}
 
 	return NewPortMap(b.network.ID, net.ParseIP("0.0.0.0"), mapped[1], b.ip, uint(port), uint(port), nil).Map()
@@ -83,18 +82,15 @@ func (b *BridgeEndpoint) configure(name string, s sandbox.Sandbox) error {
 	}
 
 	if err := netlink.LinkAdd(veth); err != nil {
-		fmt.Printf("netlink.LinkAdd(%v)\n", veth.LinkAttrs)
-		return err
+		return fmt.Errorf("Create veth pair %q/%q: %v", name, intVethName, err)
 	}
 
 	if err := netlink.LinkSetMaster(veth, b.network.bridge); err != nil {
-		fmt.Printf("netlink.LinkSetMaster()\n")
-		return err
+		return fmt.Errorf("Add link %q to bridge %q: %v", name, b.network.bridge.LinkAttrs.Name, err)
 	}
 
 	ip, err := b.network.ipallocator.Allocate()
 	if err != nil {
-		fmt.Printf("ipallocator: %v", err)
 		return err
 	}
 
@@ -124,5 +120,10 @@ func (b *BridgeEndpoint) configure(name string, s sandbox.Sandbox) error {
 }
 
 func (b *BridgeEndpoint) deconfigure(name string) error {
-	return netlink.LinkDel(&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: name}})
+	if err := netlink.LinkDel(&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: name}}); err != nil {
+		return fmt.Errorf("Deconfigure interface %q: %v", name, err)
+	}
+
+	return nil
+
 }

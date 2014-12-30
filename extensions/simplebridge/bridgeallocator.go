@@ -2,6 +2,7 @@ package simplebridge
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"time"
 
@@ -39,12 +40,12 @@ func GetBridgeIP() (*net.IPNet, error) {
 	for _, addr := range bridgeAddrs {
 		ip, ipNet, err := net.ParseCIDR(addr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("bridge allocator error: %v", err)
 		}
 
 		if !ping.Ping(&net.IPAddr{ip, ""}, 150*time.Millisecond) {
 			ipNet.IP = ip // set the bridge IP to the one we want
-			return ipNet, err
+			return ipNet, nil
 		}
 	}
 
