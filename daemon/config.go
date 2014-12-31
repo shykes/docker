@@ -3,6 +3,7 @@ package daemon
 import (
 	"net"
 
+	"github.com/docker/docker/daemon/networkdriver"
 	"github.com/docker/docker/opts"
 	flag "github.com/docker/docker/pkg/mflag"
 )
@@ -78,4 +79,11 @@ func (config *Config) InstallFlags() {
 	// daemon flags on boot2docker?
 	// If so, do not forget to check the TODO in TestIsSecure
 	config.InsecureRegistries = append(config.InsecureRegistries, "127.0.0.0/8")
+}
+
+func getDefaultNetworkMtu() int {
+	if iface, err := networkdriver.GetDefaultRouteIface(); err == nil {
+		return iface.MTU
+	}
+	return defaultNetworkMtu
 }

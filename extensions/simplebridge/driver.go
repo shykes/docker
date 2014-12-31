@@ -99,7 +99,6 @@ func (d *BridgeDriver) AddNetwork(network string, args []string) error {
 	vlanid := fs.Uint("vid", 42, "VXLan VLAN ID")
 	port := fs.Uint("port", 4789, "VXLan Tunneling Port")
 	device := fs.String("dev", "eth0", "Device to set as the vxlan endpoint")
-	force := fs.Bool("force", false, "Force creation of the interface(s) by postfixing with an integer if necessary")
 
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("Trouble parsing argument for AddNetwork on network %q: %v", network, err)
@@ -109,7 +108,7 @@ func (d *BridgeDriver) AddNetwork(network string, args []string) error {
 		return fmt.Errorf("Trouble creating network %q: %v", network, err)
 	}
 
-	bridge, err := d.createBridge(network, *vlanid, *port, *peer, *device, *force)
+	bridge, err := d.createBridge(network, *vlanid, *port, *peer, *device)
 	if err != nil {
 		return err
 	}
