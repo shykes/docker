@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// See the comments in driver_test.go about the `test0` interface.
-
 func createTestAllocate(ok bool) allocateFunc {
 	return func(dstIP net.IP) bool {
 		return ok
@@ -51,7 +49,7 @@ func TestAllocateEmpty(t *testing.T) {
 
 	createNetwork(t) // XXX from driver_test.go
 
-	ip := NewIPAllocator("test0", ipNet, tr, ta)
+	ip := NewIPAllocator("test", ipNet, tr, ta)
 	allocated, err := ip.Allocate()
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +71,7 @@ func TestAllocateBasic(t *testing.T) {
 
 	createNetwork(t) // XXX from driver_test.go
 
-	ip := NewIPAllocator("test0", ipNet, tr, ta)
+	ip := NewIPAllocator("test", ipNet, tr, ta)
 	allocated, err := ip.Allocate()
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +93,7 @@ func TestAllocateCycle(t *testing.T) {
 
 	createNetwork(t) // XXX from driver_test.go
 
-	ip := NewIPAllocator("test0", ipNet, tr, ta)
+	ip := NewIPAllocator("test", ipNet, tr, ta)
 	if allocated, err := ip.Allocate(); err == nil {
 		t.Fatalf("Did not error; should have cycled trying to allocate on %q: got %q", ipNet.String(), allocated.String())
 	}
