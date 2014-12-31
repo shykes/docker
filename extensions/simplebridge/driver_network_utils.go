@@ -139,10 +139,15 @@ func (d *BridgeDriver) getInterface(prefix string, linkParams netlink.Link, crea
 	)
 
 	if create {
+		if len(prefix) > maxVethName {
+			return nil, fmt.Errorf("getInterface: prefix %q is longer than %d bytes", prefix, maxVethName)
+		}
+
 		for i := 0; i < maxVethSuffix; i++ {
 			ethName = fmt.Sprintf("%s%d", prefix, i)
+			// this needs to be tested here because the suffix length is variable
 			if len(ethName) > maxVethName+maxVethSuffixLen {
-				return nil, fmt.Errorf("getInterface: EthName %q is longer than %d bytes", prefix, maxVethName)
+				return nil, fmt.Errorf("getInterface: EthName %q is longer than %d bytes", prefix, maxVethName+maxVethSuffixLen)
 			}
 			// FIXME create the interface here so it's atomic
 			if !d.assertInterface(ethName) {
