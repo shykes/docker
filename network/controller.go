@@ -1,3 +1,16 @@
+/*
+  network is a package that describes several interfaces for network drivers.
+
+  Please see extensions/ for documentation on how this package should be implemented.
+
+  Basic terminology:
+
+  * Driver: a piece of code used for managing networks and endpoints.
+  * Network: a full network intended to be used by many containers. In
+    simplebridge this is a single bridge interface.
+  * Endpoint: An interface for a container. Containers may have multiple
+    interfaces.
+*/
 package network
 
 import (
@@ -8,18 +21,20 @@ import (
 	"github.com/docker/docker/state"
 )
 
+/*
+  A controller is a singleton which lives inside daemon/ and controls the state
+  and organization of network objects.
+*/
 type Controller struct {
-	// FIXME:networking This probably should be a driver list
-	driver    Driver
-	networks  map[string]Network
-	endpoints map[string]Endpoint
-	state     state.State
-	mutex     sync.Mutex
-	// Containers at creation time will create an Endpoint on the default
-	// network identified by this ID.
-	DefaultNetworkID string
+	driver           Driver              // Driver that powers the creation of networks and endpoints.
+	networks         map[string]Network  // network objects, mapped from network name.
+	endpoints        map[string]Endpoint // endpoint objects, mapped from network name.
+	state            state.State         // see `state/` for an interface which describes state.
+	mutex            sync.Mutex          // Lock for creating Networks and Endpoints. May be removed.
+	DefaultNetworkID string              // Containers at creation time will create an Endpoint on the default network identified by this ID.
 }
 
+// Create a new controller. Should only be used by `daemon/`.
 func NewController(s state.State) *Controller {
 	return &Controller{
 		state:     s,
@@ -28,17 +43,21 @@ func NewController(s state.State) *Controller {
 	}
 }
 
-// FIXME:networking
+// Add the driver to the controller for use.
 func (c *Controller) AddDriver(driver Driver, name string) error {
 	c.driver = driver
 	return nil
 }
 
-// FIXME:networking
+// Predictate to determine whether or not we currently have an associated
+// driver.
 func (c *Controller) HasDriver() bool {
 	return c.driver != nil
 }
 
+// Restore takes a state object and "replays" the state to the driver. This way
+// the driver can refresh its representation of the docker networking system
+// and create or register missing devices if necessary.
 func (c *Controller) Restore(s state.State) error {
 	// FIXME:networking not yet implemented
 
@@ -64,6 +83,7 @@ func (c *Controller) Restore(s state.State) error {
 	return c.driver.Restore(s)
 }
 
+// List all registered networks
 func (c *Controller) ListNetworks() []string {
 	dids := []string{}
 	c.mutex.Lock()
@@ -75,6 +95,7 @@ func (c *Controller) ListNetworks() []string {
 	return dids
 }
 
+// Get a network by name.
 func (c *Controller) GetNetwork(id string) (Network, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -85,6 +106,7 @@ func (c *Controller) GetNetwork(id string) (Network, error) {
 	return netw, nil
 }
 
+// Remove a network by name.
 func (c *Controller) RemoveNetwork(id string) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -98,6 +120,8 @@ func (c *Controller) RemoveNetwork(id string) error {
 	return nil
 }
 
+// Create a new network. Expects a network name and a string array of flags to
+// pass to the driver.
 func (c *Controller) NewNetwork(name string, args []string) (Network, error) {
 	if err := c.driver.AddNetwork(name, args); err != nil {
 		return nil, err
@@ -147,9 +171,8 @@ type Network interface {
 // An endpoint represents a particular member of a network, registered under a certain name
 // and reachable over IP by other endpoints on the same network.
 type Endpoint interface {
-	Name() string
-
+	Name() string // name of the endpoint
 	// FIXME:networking Should we take nat.Port string format (i.e.: "80/tcp")?
-	Expose(portspec string, publish bool) error
-	Network() Network
+	Expose(portspec string, publish bool) error // expose a port from the host to the endpoint
+	Network() Network                           // network used to create this endpoint.
 }

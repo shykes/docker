@@ -5,6 +5,11 @@ import (
 	"github.com/docker/docker/state"
 )
 
+/*
+  Driver describes the interface for creating network drivers.
+
+  All functions are covered in network/controller.go
+*/
 type Driver interface {
 	Restore(netstate state.State) error
 	AddNetwork(netid string, params []string) error
