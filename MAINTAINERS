@@ -209,13 +209,13 @@ made through a pull request.
 
 
 		people = [
-			"backjlack",
 			"crosbymichael",
 			"erikh",
 			"icecrime",
 			"jfrazelle",
 			"lk4d4",
 			"tibor",
+			"unclejack",
 			"vbatts",
 			"vieux",
 			"vish"
@@ -430,6 +430,11 @@ made through a pull request.
 	Name = "Tibor Vass"
 	Email = "tibor@docker.com"
 	Github = "tiborvass"
+
+	[people.unclejack]
+	Name = "Cristian Staretu"
+	Email = "cristian.staretu@gmail.com"
+	Github = "unclejack"
 
 	[people.vbatts]
 	Name = "Vincent Batts"
